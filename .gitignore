@@ -12,3 +12,4 @@ dist/
 coverage/
 .turbo/
 apps/desktop/src-tauri/target/
+apps/web/.next
