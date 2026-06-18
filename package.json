@@ -1,0 +1,36 @@
+{
+  "name": "agent-usage-stats",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first AI session usage analyzer for Codex, Claude, and Gemini",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @agent-usage/web dev",
+    "build": "pnpm --filter @agent-usage/core build && pnpm --filter @agent-usage/shared build && pnpm --filter @agent-usage/db build && pnpm --filter @agent-usage/pricing build && pnpm --filter @agent-usage/parsers build && pnpm --filter @agent-usage/cli build && pnpm --filter @agent-usage/web build",
+    "cli": "pnpm --filter @agent-usage/cli start",
+    "lint": "eslint 'apps/**/*.{ts,tsx}' 'packages/**/*.{ts,tsx}'",
+    "lint:fix": "eslint 'apps/**/*.{ts,tsx}' 'packages/**/*.{ts,tsx}' --fix",
+    "format": "prettier --write 'apps/**/*.{ts,tsx,json}' 'packages/**/*.{ts,tsx,json}'",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r exec rm -rf dist node_modules/.cache",
+    "desktop:dev": "pnpm --filter @agent-usage/desktop dev",
+    "desktop:build": "pnpm --filter @agent-usage/desktop build"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.0.0",
+    "prettier": "^3.4.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.61.1",
+    "vitest": "^2.1.0"
+  }
+}

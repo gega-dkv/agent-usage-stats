@@ -1,0 +1,29 @@
+{
+  "name": "@agent-usage/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "agent-usage": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agent-usage/core": "workspace:*",
+    "@agent-usage/db": "workspace:*",
+    "@agent-usage/parsers": "workspace:*",
+    "@agent-usage/pricing": "workspace:*",
+    "@agent-usage/shared": "workspace:*",
+    "chalk": "^5.3.0",
+    "chokidar": "^4.0.0",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

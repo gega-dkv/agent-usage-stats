@@ -1,0 +1,20 @@
+{
+  "privacyMode": "disabled",
+  "providers": {
+    "claude": {
+      "enabled": true,
+      "paths": []
+    },
+    "codex": {
+      "enabled": true,
+      "paths": []
+    },
+    "gemini": {
+      "enabled": true,
+      "paths": []
+    }
+  },
+  "customPaths": [],
+  "currency": "USD",
+  "storeRawRecords": false
+}

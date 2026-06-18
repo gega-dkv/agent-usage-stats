@@ -1,0 +1,65 @@
+[
+  {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "currency": "USD",
+    "inputPerMillion": 2.5,
+    "outputPerMillion": 10,
+    "cachedInputPerMillion": 1.25,
+    "notes": "GPT-4o standard pricing"
+  },
+  {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "currency": "USD",
+    "inputPerMillion": 0.15,
+    "outputPerMillion": 0.6,
+    "cachedInputPerMillion": 0.075,
+    "notes": "GPT-4o mini standard pricing"
+  },
+  {
+    "provider": "openai",
+    "model": "o3",
+    "currency": "USD",
+    "inputPerMillion": 2,
+    "outputPerMillion": 8,
+    "reasoningPerMillion": 8,
+    "notes": "o3 standard pricing"
+  },
+  {
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "currency": "USD",
+    "inputPerMillion": 3,
+    "outputPerMillion": 15,
+    "cachedInputPerMillion": 0.3,
+    "notes": "Claude Sonnet 4"
+  },
+  {
+    "provider": "anthropic",
+    "model": "claude-3-5-sonnet-20241022",
+    "currency": "USD",
+    "inputPerMillion": 3,
+    "outputPerMillion": 15,
+    "cachedInputPerMillion": 0.3,
+    "notes": "Claude 3.5 Sonnet"
+  },
+  {
+    "provider": "google",
+    "model": "gemini-2.5-pro",
+    "currency": "USD",
+    "inputPerMillion": 1.25,
+    "outputPerMillion": 10,
+    "cachedInputPerMillion": 0.315,
+    "notes": "Gemini 2.5 Pro"
+  },
+  {
+    "provider": "google",
+    "model": "gemini-2.5-flash",
+    "currency": "USD",
+    "inputPerMillion": 0.15,
+    "outputPerMillion": 0.6,
+    "cachedInputPerMillion": 0.0375,
+    "notes": "Gemini 2.5 Flash"
+  }
+]

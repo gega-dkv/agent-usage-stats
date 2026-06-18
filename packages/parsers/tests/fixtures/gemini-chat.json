@@ -1,0 +1,49 @@
+{
+  "chatId": "gemini-session-1",
+  "createTime": "2026-06-17T14:00:00Z",
+  "lastUpdateTime": "2026-06-17T15:20:00Z",
+  "messages": [
+    {
+      "role": "user",
+      "parts": [{"text": "Write a function to calculate Fibonacci numbers"}],
+      "usageMetadata": {
+        "promptTokenCount": 1200,
+        "candidatesTokenCount": 0,
+        "totalTokenCount": 1200
+      },
+      "createTime": "2026-06-17T14:00:00Z"
+    },
+    {
+      "role": "model",
+      "parts": [{"text": "Here's an efficient Fibonacci function using iteration:"}],
+      "model": "gemini-2.5-pro",
+      "usageMetadata": {
+        "promptTokenCount": 0,
+        "candidatesTokenCount": 300,
+        "totalTokenCount": 300
+      },
+      "createTime": "2026-06-17T14:01:00Z"
+    },
+    {
+      "role": "user",
+      "parts": [{"text": "Can you add memoization to it?"}],
+      "usageMetadata": {
+        "promptTokenCount": 1500,
+        "candidatesTokenCount": 0,
+        "totalTokenCount": 1500
+      },
+      "createTime": "2026-06-17T15:00:00Z"
+    },
+    {
+      "role": "model",
+      "parts": [{"text": "Here's the memoized version:"}],
+      "model": "gemini-2.5-pro",
+      "usageMetadata": {
+        "promptTokenCount": 0,
+        "candidatesTokenCount": 400,
+        "totalTokenCount": 400
+      },
+      "createTime": "2026-06-17T15:01:00Z"
+    }
+  ]
+}
