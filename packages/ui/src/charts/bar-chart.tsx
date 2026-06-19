@@ -1,5 +1,3 @@
-import React from 'react';
-
 type BarChartData = {
   label: string;
   value: number;

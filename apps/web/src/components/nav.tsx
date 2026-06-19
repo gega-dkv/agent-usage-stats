@@ -8,6 +8,7 @@ const links = [
   { href: '/', label: 'Dashboard' },
   { href: '/sessions', label: 'Sessions' },
   { href: '/prompts', label: 'Prompts' },
+  { href: '/providers', label: 'Providers' },
   { href: '/pricing', label: 'Pricing' },
   { href: '/settings', label: 'Settings' },
 ];

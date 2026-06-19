@@ -1,4 +1,5 @@
 import type { TokenTotals, Provider, PricingProvider } from './types.js';
+import { PROVIDER_REGISTRY } from './providers.js';
 
 export function computeTotalTokens(totals: Omit<TokenTotals, 'totalTokens'>): number {
   return (
@@ -27,12 +28,7 @@ export function addTokenTotals(a: TokenTotals, b: TokenTotals): TokenTotals {
 }
 
 export function providerToPricingProvider(provider: Provider): PricingProvider {
-  const map: Record<Provider, PricingProvider> = {
-    codex: 'openai',
-    claude: 'anthropic',
-    gemini: 'google',
-  };
-  return map[provider];
+  return PROVIDER_REGISTRY[provider]?.pricingProvider ?? 'other';
 }
 
 export function formatNumber(n: number): string {

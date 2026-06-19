@@ -1,5 +1,31 @@
-export type Provider = 'codex' | 'claude' | 'gemini';
-export type PricingProvider = 'openai' | 'anthropic' | 'google';
+export type Provider =
+  | 'codex'
+  | 'claude'
+  | 'gemini'
+  | 'opencode'
+  | 'qwen'
+  | 'goose'
+  | 'droid'
+  | 'amp'
+  | 'codebuff'
+  | 'kimi'
+  | 'copilot'
+  | 'openclaw'
+  | 'hermes'
+  | 'pi-agent'
+  | 'kilo'
+  | 'aider'
+  | 'cursor'
+  | 'specstory'
+  | 'crush';
+
+export type PricingProvider =
+  | 'openai'
+  | 'anthropic'
+  | 'google'
+  | 'qwen'
+  | 'moonshot'
+  | 'other';
 export type PrivacyMode = 'disabled' | 'preview' | 'full' | 'raw';
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool' | 'unknown';
 export type PricingProfile = 'api-standard' | 'api-batch' | 'subscription-equivalent' | 'custom';
@@ -79,17 +105,27 @@ export type ParserWarning = {
   severity: 'warning' | 'error';
 };
 
+export type ProviderConfig = { enabled: boolean; paths: string[] };
+
 export type AppConfig = {
   privacyMode: PrivacyMode;
-  providers: {
-    claude: { enabled: boolean; paths: string[] };
-    codex: { enabled: boolean; paths: string[] };
-    gemini: { enabled: boolean; paths: string[] };
+  /**
+   * Per-provider overrides. The three first-class providers are always present;
+   * any other registered provider may be added to opt in/out or override paths.
+   */
+  providers: Partial<Record<Provider, ProviderConfig>> & {
+    claude: ProviderConfig;
+    codex: ProviderConfig;
+    gemini: ProviderConfig;
   };
   customPaths: string[];
   dbPath?: string;
   currency: string;
   storeRawRecords: boolean;
+  /** Re-simulate provider-recorded costs from token counts instead of trusting them. */
+  resimulateRecordedCosts?: boolean;
+  /** Allow text-based token estimation for prompt-history-only providers. */
+  estimatePromptOnlySources?: boolean;
 };
 
 export type DailyUsage = {

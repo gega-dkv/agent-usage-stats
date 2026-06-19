@@ -63,6 +63,8 @@ export function initializeDatabase(dbPath?: string): AppDatabase {
       reasoning_tokens INTEGER DEFAULT 0,
       total_tokens INTEGER DEFAULT 0,
       estimated_cost REAL DEFAULT 0,
+      cost_estimated INTEGER DEFAULT 0,
+      recorded_cost REAL,
       model TEXT,
       metadata TEXT,
       created_at TEXT NOT NULL
@@ -197,7 +199,57 @@ export function initializeDatabase(dbPath?: string): AppDatabase {
     CREATE INDEX IF NOT EXISTS idx_usage_yearly_year ON usage_yearly(year);
     CREATE INDEX IF NOT EXISTS idx_usage_yearly_provider ON usage_yearly(provider);
     CREATE INDEX IF NOT EXISTS idx_warnings_scan_run ON parser_warnings(scan_run_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_provider_hash_id
+      ON sessions(provider, file_hash, id);
   `);
 
+  // Full-text search over message content (only populated when privacy mode
+  // stores text). FTS5 ships with better-sqlite3; guard in case a custom build
+  // lacks it so the rest of the app still works.
+  try {
+    sqlite.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        message_id UNINDEXED,
+        session_id UNINDEXED,
+        content
+      );
+    `);
+  } catch {
+    // FTS5 unavailable — search falls back to LIKE.
+  }
+
+  // Lightweight, idempotent migrations for DBs created before a column existed.
+  ensureColumn(sqlite, 'sessions', 'cost_estimated', 'INTEGER DEFAULT 0');
+  ensureColumn(sqlite, 'sessions', 'recorded_cost', 'REAL');
+
   return { db, sqlite, path: resolvedPath };
+}
+
+/** Returns true if the SQLite build exposes an FTS5-backed messages_fts table. */
+export function hasFtsSupport(sqlite: DatabaseType): boolean {
+  try {
+    const row = sqlite
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'")
+      .get();
+    return Boolean(row);
+  } catch {
+    return false;
+  }
+}
+
+/** Adds a column to a table if it does not already exist (no-op otherwise). */
+function ensureColumn(
+  sqlite: DatabaseType,
+  table: string,
+  column: string,
+  definition: string,
+): void {
+  try {
+    const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === column)) {
+      sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
+  } catch {
+    // Table may not exist yet on a brand-new DB; CREATE TABLE handled it.
+  }
 }

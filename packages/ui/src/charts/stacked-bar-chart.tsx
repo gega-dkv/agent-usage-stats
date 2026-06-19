@@ -1,5 +1,3 @@
-import React from 'react';
-
 type StackItem = {
   label: string;
   value: number;

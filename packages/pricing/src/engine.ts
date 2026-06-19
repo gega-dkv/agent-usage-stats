@@ -73,9 +73,9 @@ export function lookupPricing(
 
   // Fallback to default model for this provider
   const fallback = getDefaultFallbackModel(provider);
-  const fallbackPricing = pricingModels.find(
-    (p) => p.model === fallback && p.provider === provider,
-  );
+  const fallbackPricing = fallback
+    ? pricingModels.find((p) => p.model === fallback && p.provider === provider)
+    : undefined;
 
   return {
     pricing: fallbackPricing || null,
@@ -84,8 +84,8 @@ export function lookupPricing(
   };
 }
 
-export function getDefaultFallbackModel(provider: PricingProvider): string {
-  const fallbacks: Record<PricingProvider, string> = {
+export function getDefaultFallbackModel(provider: PricingProvider): string | undefined {
+  const fallbacks: Partial<Record<PricingProvider, string>> = {
     openai: 'gpt-4o',
     anthropic: 'claude-sonnet-4-20250514',
     google: 'gemini-2.5-pro',

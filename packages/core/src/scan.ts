@@ -1,11 +1,13 @@
 import fs from 'fs';
-import type { Provider, AppConfig, ParserWarning } from '@agent-usage/shared';
-import { hashFileContent, providerToPricingProvider } from '@agent-usage/shared';
+import crypto from 'crypto';
+import type { Provider, AppConfig, ParserWarning, NormalizedSession } from '@agent-usage/shared';
+import { providerToPricingProvider } from '@agent-usage/shared';
 import type { ModelPricing, PricingProfile, PricingProvider } from '@agent-usage/shared';
 import { discoverSessionFiles, getParserForFile } from '@agent-usage/parsers';
 import type { AppDatabase } from '@agent-usage/db';
 import {
   getPricingModels,
+  getSetting,
   insertParserWarning,
   insertScanRun,
   refreshUsageRollups,
@@ -14,6 +16,7 @@ import {
   upsertSession,
 } from '@agent-usage/db';
 import { calculateCost, lookupPricing, getDefaultPricingModels } from '@agent-usage/pricing';
+import type { PrivacyMode } from '@agent-usage/shared';
 
 export type ScanResult = {
   filesScanned: number;
@@ -40,6 +43,11 @@ export async function scanSessions(
     errors: [],
   };
 
+  // A privacy mode persisted via the CLI/web (`settings` table) overrides the
+  // config-file default, so `privacy set` reliably affects subsequent scans.
+  const persistedPrivacy = getSetting(db, 'privacyMode') as PrivacyMode | undefined;
+  const privacyMode: PrivacyMode = persistedPrivacy ?? config.privacyMode;
+
   // Create scan run record
   const scanRunId = insertScanRun(db, { status: 'running', provider: options?.provider }) as number;
 
@@ -47,7 +55,7 @@ export async function scanSessions(
     // Discover files
     const files = await discoverSessionFiles(config, options?.paths);
     const filteredFiles = options?.provider
-      ? files.filter((f) => f.provider === options.provider)
+      ? files.filter((f: { provider: Provider }) => f.provider === options.provider)
       : files;
 
     result.filesScanned = filteredFiles.length;
@@ -56,8 +64,12 @@ export async function scanSessions(
 
     for (const file of filteredFiles) {
       try {
-        // Read a sample to detect parser
-        const sample = fs.readFileSync(file.path, 'utf-8').slice(0, 4096);
+        // Read the full file once: a streaming hash for dedup, a sample for
+        // parser detection. Hashing the entire content (not just the first 4 KB)
+        // means appended sessions are correctly re-ingested.
+        const content = fs.readFileSync(file.path, 'utf-8');
+        const sample = content.slice(0, 4096);
+        const fileHash = crypto.createHash('sha256').update(content).digest('hex');
         const parser = getParserForFile(file.path, sample);
 
         if (!parser) {
@@ -71,27 +83,34 @@ export async function scanSessions(
 
         // Parse the file
         const parseResult = await parser.parse(file.path, {
-          privacyMode: config.privacyMode,
+          privacyMode,
         });
 
         // Store sessions
         for (const session of parseResult.sessions) {
-          const fileHash = hashFileContent(sample);
           const sessionId = upsertSession(db, session, fileHash) as string;
 
           // Calculate cost
+          const sessionModel = pickSessionModel(session);
           const pricing = lookupPricing(
-            session.messages[0]?.model,
+            sessionModel,
             providerToPricingProvider(session.provider),
             pricingModels,
           );
 
           if (pricing.pricing) {
-            const { cost } = calculateCost(session.totals, pricing.pricing);
-            // Update session cost in DB using raw sqlite
+            const { cost, isEstimated } = calculateCost(session.totals, pricing.pricing);
+            const costEstimated = isEstimated || pricing.isEstimated;
             sqlite
-              .prepare('UPDATE sessions SET estimated_cost = ?, model = ? WHERE id = ?')
-              .run(cost, session.messages[0]?.model || 'unknown', sessionId);
+              .prepare(
+                'UPDATE sessions SET estimated_cost = ?, model = ?, cost_estimated = ? WHERE id = ?',
+              )
+              .run(cost, sessionModel || 'unknown', costEstimated ? 1 : 0, sessionId);
+          } else {
+            // No pricing available at all — keep cost at 0 but mark estimated.
+            sqlite
+              .prepare('UPDATE sessions SET cost_estimated = 1, model = ? WHERE id = ?')
+              .run(sessionModel || 'unknown', sessionId);
           }
 
           // Store messages
@@ -166,8 +185,16 @@ function ensurePricingModels(db: AppDatabase['db']): ModelPricing[] {
   return normalizeStoredPricing(getPricingModels(db));
 }
 
+/** Pick the most representative model for a session (first message that names one). */
+function pickSessionModel(session: NormalizedSession): string | undefined {
+  for (const message of session.messages) {
+    if (message.model) return message.model;
+  }
+  return undefined;
+}
+
 function normalizeStoredPricing(models: ReturnType<typeof getPricingModels>): ModelPricing[] {
-  return models.map((model) => ({
+  return models.map((model: ReturnType<typeof getPricingModels>[number]) => ({
     provider: model.provider as PricingProvider,
     model: model.model,
     currency: 'USD',

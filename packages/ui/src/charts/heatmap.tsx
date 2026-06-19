@@ -1,5 +1,3 @@
-import React from 'react';
-
 type CalendarHeatmapData = {
   date: string;
   value: number;

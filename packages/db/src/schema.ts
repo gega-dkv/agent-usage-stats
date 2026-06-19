@@ -25,6 +25,8 @@ export const sessions = sqliteTable(
     reasoningTokens: integer('reasoning_tokens').default(0),
     totalTokens: integer('total_tokens').default(0),
     estimatedCost: real('estimated_cost').default(0),
+    costEstimated: integer('cost_estimated', { mode: 'boolean' }).default(false),
+    recordedCost: real('recorded_cost'),
     model: text('model'),
     metadata: text('metadata'),
     createdAt: text('created_at').notNull(),

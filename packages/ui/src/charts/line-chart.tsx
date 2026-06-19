@@ -1,5 +1,3 @@
-import React from 'react';
-
 type LineChartData = {
   label: string;
   value: number;

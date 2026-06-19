@@ -27,5 +27,8 @@ export {
   getInstalledProviders,
   getProviderBasePath,
   getProviderPaths,
+  getProviderDefaultPaths,
+  detectProvider,
+  expandPath,
 } from './discovery.js';
 export type { AgentInstallation, DiscoveredFile } from './discovery.js';

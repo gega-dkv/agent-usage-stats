@@ -2,7 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { glob } from 'glob';
-import type { Provider, AppConfig } from '@agent-usage/shared';
+import type {
+  Provider,
+  AppConfig,
+  ProviderDefinition,
+  ProviderSupportLevel,
+} from '@agent-usage/shared';
+import { listProviders, getProviderDefinition, providersWithParser } from '@agent-usage/shared';
 
 export type DiscoveredFile = {
   path: string;
@@ -14,54 +20,97 @@ export type AgentInstallation = {
   label: string;
   path: string;
   installed: boolean;
+  hasParser: boolean;
+  supportLevel: ProviderSupportLevel;
+  envVars: string[];
   sessionPatterns: string[];
 };
 
-const DEFAULT_PATHS: Record<Provider, string[]> = {
-  claude: [path.join(os.homedir(), '.claude', 'projects', '**', '*.jsonl')],
-  gemini: [path.join(os.homedir(), '.gemini', 'tmp', '**', 'chats', '**', '*')],
-  codex: getCodexPaths(),
-};
+/**
+ * Expand `~` and `$ENV` placeholders in a registry path pattern.
+ * Returns `null` when the pattern references an environment variable that is
+ * not set (so we don't accidentally glob from the filesystem root).
+ */
+export function expandPath(pattern: string): string | null {
+  let result = pattern;
 
-const PROVIDER_LABELS: Record<Provider, string> = {
-  claude: 'Claude',
-  codex: 'Codex',
-  gemini: 'Gemini',
-};
+  if (result.startsWith('~')) {
+    result = path.join(os.homedir(), result.slice(1));
+  }
 
-function getCodexPaths(): string[] {
-  const base = getProviderBasePath('codex');
+  // Replace $VAR / ${VAR} tokens with their environment values.
+  let missingEnv = false;
+  result = result.replace(/\$\{?([A-Z0-9_]+)\}?/g, (_match, name: string) => {
+    const value = process.env[name];
+    if (!value) {
+      missingEnv = true;
+      return '';
+    }
+    return value;
+  });
 
-  return [
-    path.join(base, '**', '*.json'),
-    path.join(base, '**', '*.jsonl'),
-    path.join(base, '**', '*.transcript'),
-    path.join(base, '**', '*.conversation'),
-    path.join(base, '**', '*.history'),
-    path.join(base, '**', '*session*'),
-  ];
+  return missingEnv ? null : result;
 }
 
+function expandPatterns(patterns: string[]): string[] {
+  return patterns
+    .map(expandPath)
+    .filter((p): p is string => p != null && p.length > 0);
+}
+
+/** Resolved glob patterns where a provider's sessions may live. */
+export function getProviderDefaultPaths(provider: Provider): string[] {
+  const def = getProviderDefinition(provider);
+  return def ? expandPatterns(def.defaultPaths) : [];
+}
+
+/** @deprecated kept for compatibility — prefer getProviderDefaultPaths. */
+export function getProviderPaths(provider: Provider): string[] {
+  return getProviderDefaultPaths(provider);
+}
+
+/** Best-effort base directory for a provider (used by `doctor`/`sync`). */
 export function getProviderBasePath(provider: Provider): string {
-  if (provider === 'codex') {
-    return process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-  }
-  return path.join(os.homedir(), `.${provider}`);
+  const def = getProviderDefinition(provider);
+  const dirs = def ? expandPatterns(def.detectDirs) : [];
+  if (dirs.length > 0) return dirs[0];
+  // Fall back to the first non-glob path segment.
+  const paths = getProviderDefaultPaths(provider);
+  return paths[0] ? paths[0].split(/[*{[]/)[0] : path.join(os.homedir(), `.${provider}`);
+}
+
+function providerConfig(config: AppConfig | undefined, provider: Provider) {
+  return config?.providers?.[provider];
+}
+
+function isProviderEnabled(config: AppConfig | undefined, def: ProviderDefinition): boolean {
+  const override = providerConfig(config, def.id);
+  return override ? override.enabled : def.enabledByDefault;
+}
+
+/** True when any of a provider's detect dirs (or configured paths) exist. */
+function providerInstalled(config: AppConfig | undefined, def: ProviderDefinition): boolean {
+  const detectDirs = expandPatterns(def.detectDirs);
+  if (detectDirs.some((dir) => fs.existsSync(dir))) return true;
+
+  const configuredPaths = providerConfig(config, def.id)?.paths ?? [];
+  return configuredPaths.some(pathLooksInstalled);
 }
 
 export function detectAgentInstallations(config?: AppConfig): AgentInstallation[] {
-  const providers: Provider[] = ['codex', 'claude', 'gemini'];
-
-  return providers.map((provider) => {
-    const basePath = getProviderBasePath(provider);
-    const configuredPaths = config?.providers[provider]?.paths ?? [];
-    const sessionPatterns = configuredPaths.length > 0 ? configuredPaths : DEFAULT_PATHS[provider];
+  return listProviders().map((def) => {
+    const configuredPaths = providerConfig(config, def.id)?.paths ?? [];
+    const sessionPatterns =
+      configuredPaths.length > 0 ? configuredPaths : getProviderDefaultPaths(def.id);
 
     return {
-      provider,
-      label: PROVIDER_LABELS[provider],
-      path: basePath,
-      installed: fs.existsSync(basePath) || configuredPaths.some(pathLooksInstalled),
+      provider: def.id,
+      label: def.label,
+      path: getProviderBasePath(def.id),
+      installed: providerInstalled(config, def),
+      hasParser: def.hasParser,
+      supportLevel: def.supportLevel,
+      envVars: def.envVars,
       sessionPatterns,
     };
   });
@@ -78,78 +127,57 @@ export async function discoverSessionFiles(
   customPaths?: string[],
 ): Promise<DiscoveredFile[]> {
   const files: DiscoveredFile[] = [];
+  const seen = new Set<string>();
+
+  const addMatch = (match: string, provider: Provider) => {
+    if (seen.has(match)) return;
+    seen.add(match);
+    files.push({ path: match, provider });
+  };
+
+  const globPattern = async (pattern: string): Promise<string[]> => {
+    try {
+      return await glob(pattern, {
+        absolute: true,
+        nodir: true,
+        ignore: ['**/node_modules/**', '**/.git/**'],
+      });
+    } catch {
+      return [];
+    }
+  };
 
   if (customPaths?.length) {
     for (const pattern of customPaths.map(resolvePattern)) {
-      try {
-        const matches = await glob(pattern, {
-          absolute: true,
-          nodir: true,
-          ignore: ['**/node_modules/**', '**/.git/**'],
-        });
-
-        for (const match of matches) {
-          if (!files.some((f) => f.path === match)) {
-            files.push({ path: match, provider: detectProvider(match) });
-          }
-        }
-      } catch {
-        // Pattern might not exist, skip silently
+      for (const match of await globPattern(pattern)) {
+        addMatch(match, detectProvider(match));
       }
     }
-
     return files;
   }
 
-  const providers: Provider[] = ['claude', 'codex', 'gemini'];
+  // Only providers that have a parser are globbed during a normal scan; the rest
+  // are surfaced via detection (Providers page / doctor) without spamming
+  // "no parser" warnings for large home-directory trees.
+  const parserProviders = new Set(providersWithParser());
 
-  for (const provider of providers) {
-    if (!config.providers[provider].enabled) continue;
+  for (const def of listProviders()) {
+    if (!parserProviders.has(def.id)) continue;
+    if (!isProviderEnabled(config, def)) continue;
 
-    const paths = [
-      ...config.providers[provider].paths,
-      ...DEFAULT_PATHS[provider],
-    ];
+    const configuredPaths = providerConfig(config, def.id)?.paths ?? [];
+    const patterns = [...configuredPaths.map(resolvePattern), ...getProviderDefaultPaths(def.id)];
 
-    for (const pattern of paths) {
-      try {
-        const matches = await glob(pattern, {
-          absolute: true,
-          nodir: true,
-          ignore: ['**/node_modules/**', '**/.git/**'],
-        });
-
-        for (const match of matches) {
-          // Avoid duplicates
-          if (!files.some((f) => f.path === match)) {
-            files.push({ path: match, provider });
-          }
-        }
-      } catch {
-        // Pattern might not exist, skip silently
+    for (const pattern of patterns) {
+      for (const match of await globPattern(pattern)) {
+        addMatch(match, def.id);
       }
     }
   }
 
-  // Add custom paths
-  if (!customPaths?.length && config.customPaths) {
-    for (const pattern of config.customPaths.map(resolvePattern)) {
-      try {
-        const matches = await glob(pattern, {
-          absolute: true,
-          nodir: true,
-        });
-
-        for (const match of matches) {
-          // Try to detect provider from path
-          const provider = detectProvider(match);
-          if (!files.some((f) => f.path === match)) {
-            files.push({ path: match, provider });
-          }
-        }
-      } catch {
-        // Skip silently
-      }
+  for (const pattern of (config.customPaths ?? []).map(resolvePattern)) {
+    for (const match of await globPattern(pattern)) {
+      addMatch(match, detectProvider(match));
     }
   }
 
@@ -157,32 +185,35 @@ export async function discoverSessionFiles(
 }
 
 function pathLooksInstalled(pattern: string): boolean {
-  const staticPath = pattern.split(/[*{[]/)[0];
+  const expanded = expandPath(pattern);
+  if (!expanded) return false;
+  const staticPath = expanded.split(/[*{[]/)[0];
   const resolved = staticPath.endsWith(path.sep) ? staticPath.slice(0, -1) : staticPath;
   return resolved.length > 0 && fs.existsSync(resolved);
 }
 
 function resolvePattern(pattern: string): string {
-  return path.isAbsolute(pattern) ? pattern : path.resolve(pattern);
+  const expanded = expandPath(pattern) ?? pattern;
+  return path.isAbsolute(expanded) ? expanded : path.resolve(expanded);
 }
 
-function detectProvider(filePath: string): Provider {
-  if (filePath.includes('.claude')) return 'claude';
-  if (filePath.includes('.gemini')) return 'gemini';
-  if (filePath.includes('.codex')) return 'codex';
+/** Detect a provider from a file path (and, as a fallback, its contents). */
+export function detectProvider(filePath: string): Provider {
+  // Match against registry detect-dir hints first (e.g. ".claude", ".gemini").
+  for (const def of listProviders()) {
+    for (const dir of def.detectDirs) {
+      const leaf = dir.replace(/^~\//, '').replace(/^~/, '');
+      if (leaf && filePath.includes(leaf)) return def.id;
+    }
+  }
 
-  // Try to detect from content
   try {
     const sample = fs.readFileSync(filePath, 'utf-8').slice(0, 1024);
     if (sample.includes('"session_id"') && sample.includes('"uuid"')) return 'claude';
     if (sample.includes('"chatId"') || sample.includes('"usageMetadata"')) return 'gemini';
   } catch {
-    // Ignore
+    // Ignore unreadable files.
   }
 
   return 'codex';
-}
-
-export function getProviderPaths(provider: Provider): string[] {
-  return DEFAULT_PATHS[provider];
 }

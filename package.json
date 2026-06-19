@@ -11,7 +11,7 @@
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "pnpm --filter @agent-usage/web dev",
-    "build": "pnpm --filter @agent-usage/core build && pnpm --filter @agent-usage/shared build && pnpm --filter @agent-usage/db build && pnpm --filter @agent-usage/pricing build && pnpm --filter @agent-usage/parsers build && pnpm --filter @agent-usage/cli build && pnpm --filter @agent-usage/web build",
+    "build": "pnpm --filter @agent-usage/shared build && pnpm --filter @agent-usage/pricing build && pnpm --filter @agent-usage/db build && pnpm --filter @agent-usage/parsers build && pnpm --filter @agent-usage/ui build && pnpm --filter @agent-usage/core build && pnpm --filter @agent-usage/cli build && pnpm --filter @agent-usage/web build",
     "cli": "pnpm --filter @agent-usage/cli start",
     "lint": "eslint 'apps/**/*.{ts,tsx}' 'packages/**/*.{ts,tsx}'",
     "lint:fix": "eslint 'apps/**/*.{ts,tsx}' 'packages/**/*.{ts,tsx}' --fix",

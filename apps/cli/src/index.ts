@@ -5,22 +5,34 @@ import { initializeDatabase } from '@agent-usage/db';
 import {
   getDailyUsage,
   getMonthlyUsage,
+  getYearlyUsage,
   getStatsSummary,
   searchMessages,
   getPricingModels,
   upsertPricingModel,
   getSetting,
   setSetting,
+  purgeContent,
+  refreshUsageRollups,
 } from '@agent-usage/db';
 import { scanSessions, loadConfig } from '@agent-usage/core';
-import { detectAgentInstallations } from '@agent-usage/parsers';
+import {
+  detectAgentInstallations,
+  getProviderDefaultPaths,
+  expandPath,
+} from '@agent-usage/parsers';
 import type { AgentInstallation } from '@agent-usage/parsers';
 import { getDefaultPricingModels } from '@agent-usage/pricing';
-import { formatNumber, formatCurrency } from '@agent-usage/shared';
+import {
+  formatNumber,
+  formatCurrency,
+  getProviderDefinition,
+  isKnownProvider,
+  providersWithParser,
+} from '@agent-usage/shared';
 import type { Provider } from '@agent-usage/shared';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import readline from 'readline/promises';
 
 const program = new Command();
@@ -87,7 +99,7 @@ program
   .action(async (options) => {
     const config = loadConfig();
     const database = initializeDatabase(config.dbPath);
-    const agents = detectAgentInstallations(config);
+    const agents = detectAgentInstallations(config).filter((agent) => agent.hasParser);
     const installed = agents.filter((agent) => agent.installed);
     const requestedAgent = parseSyncAgent(options.agent || options.provider);
 
@@ -167,8 +179,7 @@ program
       } else if (options.month) {
         data = getMonthlyUsage(db, { from: options.from, to: options.to });
       } else {
-        // Yearly - use monthly and group
-        data = getMonthlyUsage(db, { from: options.from, to: options.to });
+        data = getYearlyUsage(db, { from: options.from, to: options.to });
       }
 
       if (options.json) {
@@ -408,15 +419,22 @@ privacyCmd
 
 privacyCmd
   .command('purge-content')
-  .description('Purge stored prompt/response content')
-  .action(() => {
+  .description('Permanently purge stored prompt/response/raw content and the search index')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
     const config = loadConfig();
-    const { db } = initializeDatabase(config.dbPath);
+    const { sqlite } = initializeDatabase(config.dbPath);
 
-    // This would need to clear content_text, raw fields from messages
-    console.log('Purging stored content...');
-    db.run("UPDATE messages SET content_text = NULL, raw = NULL");
-    console.log('Content purged successfully');
+    const result = purgeContent(sqlite);
+
+    if (options.json) {
+      console.log(JSON.stringify({ purged: result }, null, 2));
+      return;
+    }
+
+    console.log(`Purged content from ${result.messages} message rows.`);
+    console.log(`Removed ${result.fts} full-text search entries.`);
+    console.log('Content purged successfully.');
   });
 
 // Watch command
@@ -431,11 +449,10 @@ program
     const config = loadConfig();
     const database = initializeDatabase(config.dbPath);
 
-    const paths = [
-      ...(config.providers.claude.paths.length > 0 ? config.providers.claude.paths : [path.join(os.homedir(), '.claude', 'projects', '**', '*.jsonl')]),
-      ...(config.providers.gemini.paths.length > 0 ? config.providers.gemini.paths : [path.join(os.homedir(), '.gemini', 'tmp', '**', 'chats', '**', '*')]),
-      ...(config.providers.codex.paths.length > 0 ? config.providers.codex.paths : [path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), '**', '*')]),
-    ];
+    const paths = providersWithParser().flatMap((provider) => {
+      const configured = config.providers[provider]?.paths ?? [];
+      return configured.length > 0 ? configured : getProviderDefaultPaths(provider);
+    });
 
     const watcher = (chokidar as any).watch(paths, {
       persistent: true,
@@ -466,48 +483,221 @@ program
     await new Promise(() => {});
   });
 
-// Dashboard command
+// Dashboard command — actually launch the local web app.
 program
   .command('dashboard')
-  .description('Open web dashboard')
-  .action(() => {
-    console.log('Starting web dashboard...');
-    // This would start the Next.js server
-    console.log('Run "pnpm dev" from the project root to start the dashboard');
+  .description('Start the local web dashboard')
+  .option('-p, --port <port>', 'Port to listen on', '3000')
+  .option('--no-open', 'Do not open the browser automatically')
+  .action(async (options) => {
+    const { spawn } = await import('child_process');
+    const repoRoot = findRepoRoot();
+
+    if (!repoRoot) {
+      console.error('Could not locate the project root. Run "pnpm dev" from the repository.');
+      return;
+    }
+
+    console.log(`Starting dashboard on http://localhost:${options.port} ...`);
+    const child = spawn('pnpm', ['--filter', '@agent-usage/web', 'dev', '--port', String(options.port)], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+      env: { ...process.env },
+    });
+
+    if (options.open) {
+      setTimeout(() => void openBrowser(`http://localhost:${options.port}`), 2500);
+    }
+
+    child.on('exit', (code) => process.exit(code ?? 0));
+  });
+
+// Providers command — list every known provider, its support level and status.
+const providersCmd = program
+  .command('providers')
+  .description('List supported providers and detection status')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
+    const config = loadConfig();
+    const agents = detectAgentInstallations(config);
+
+    if (options.json) {
+      console.log(JSON.stringify(agents, null, 2));
+      return;
+    }
+
+    console.log('\nProviders:\n');
+    console.log(
+      'Provider'.padEnd(22) +
+        'Status'.padEnd(12) +
+        'Parser'.padEnd(8) +
+        'Support'.padEnd(22) +
+        'Path',
+    );
+    console.log('-'.repeat(96));
+    for (const agent of agents) {
+      console.log(
+        agent.label.padEnd(22) +
+          (agent.installed ? 'detected' : 'not found').padEnd(12) +
+          (agent.hasParser ? 'yes' : 'no').padEnd(8) +
+          agent.supportLevel.padEnd(22) +
+          agent.path,
+      );
+    }
+    console.log(`\n${agents.filter((a) => a.installed).length} of ${agents.length} providers detected.`);
+  });
+
+providersCmd
+  .command('detect')
+  .description('Detect installed providers (machine-readable)')
+  .option('--json', 'Output as JSON')
+  .action((options, command) => {
+    const config = loadConfig();
+    const installed = detectAgentInstallations(config).filter((a) => a.installed);
+    const json = options.json || command.optsWithGlobals().json;
+
+    if (json) {
+      console.log(JSON.stringify({ installed }, null, 2));
+      return;
+    }
+
+    if (installed.length === 0) {
+      console.log('No providers detected.');
+      return;
+    }
+    for (const agent of installed) {
+      console.log(`${agent.label} (${agent.provider}) - ${agent.path}`);
+    }
+  });
+
+// Inspect-schema — open a provider's SQLite store read-only and dump its shape.
+program
+  .command('inspect-schema')
+  .description('Inspect a SQLite-backed provider database read-only (never modifies it)')
+  .requiredOption('-p, --provider <provider>', 'Provider id (e.g. opencode, goose, kilo, hermes)')
+  .option('-f, --file <path>', 'Explicit DB file (otherwise auto-discovered)')
+  .option('--json', 'Output as JSON')
+  .action(async (options) => {
+    const provider = options.provider as string;
+    const def = getProviderDefinition(provider);
+    if (!def) {
+      console.error(`Unknown provider "${provider}".`);
+      return;
+    }
+
+    const dbFile = options.file || findSqliteFile(provider);
+    if (!dbFile) {
+      console.error(
+        `No SQLite database found for ${def.label}. Pass --file, or check ${def.detectDirs.join(', ')}.`,
+      );
+      return;
+    }
+
+    const Database = (await import('better-sqlite3')).default;
+    let sqlite: import('better-sqlite3').Database | undefined;
+    try {
+      sqlite = new Database(dbFile, { readonly: true, fileMustExist: true });
+      const tables = sqlite
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .all() as Array<{ name: string }>;
+
+      const schema = tables.map((t) => {
+        const columns = sqlite!
+          .prepare(`PRAGMA table_info(${t.name})`)
+          .all() as Array<{ name: string; type: string }>;
+        return {
+          table: t.name,
+          columns: columns.map((c) => ({ name: c.name, type: c.type })),
+          likelyUsageTable: looksLikeUsageTable(t.name, columns.map((c) => c.name)),
+        };
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify({ provider, file: dbFile, tables: schema }, null, 2));
+        return;
+      }
+
+      console.log(`\nSchema for ${def.label} (${dbFile}):\n`);
+      for (const t of schema) {
+        const flag = t.likelyUsageTable ? '  <- likely usage table' : '';
+        console.log(`Table: ${t.table}${flag}`);
+        for (const c of t.columns) {
+          console.log(`    ${c.name} ${c.type}`);
+        }
+        console.log('');
+      }
+    } catch (e) {
+      console.error(`Failed to inspect: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      sqlite?.close();
+    }
   });
 
 // Doctor command
 program
   .command('doctor')
   .description('Check system health and configuration')
-  .action(() => {
-    console.log('\nSystem Health Check:\n');
-
-    // Check Node.js version
+  .option('-p, --provider <provider>', 'Show setup guidance for a specific provider')
+  .option('--json', 'Output as JSON')
+  .action((options) => {
+    const config = loadConfig();
     const nodeVersion = process.version;
-    console.log(`Node.js: ${nodeVersion} ${nodeVersion >= 'v20.0.0' ? '✓' : '✗ (v20+ required)'}`);
+    const nodeOk = Number(process.versions.node.split('.')[0]) >= 20;
 
-    // Check database
+    let dbPath = '';
+    let dbOk = false;
     try {
-      const config = loadConfig();
-      const { path: dbPath } = initializeDatabase(config.dbPath);
-      console.log(`Database: ${dbPath} ✓`);
-    } catch (e) {
-      console.log(`Database: ✗ ${e instanceof Error ? e.message : String(e)}`);
+      dbPath = initializeDatabase(config.dbPath).path;
+      dbOk = true;
+    } catch {
+      dbOk = false;
     }
 
-    // Check provider directories
-    const providers = [
-      { name: 'Claude', path: path.join(os.homedir(), '.claude') },
-      { name: 'Gemini', path: path.join(os.homedir(), '.gemini') },
-      { name: 'Codex', path: process.env.CODEX_HOME || path.join(os.homedir(), '.codex') },
-    ];
+    const agents = detectAgentInstallations(config);
+    const providerReport = agents.map((a) => ({
+      provider: a.provider,
+      label: a.label,
+      installed: a.installed,
+      hasParser: a.hasParser,
+      supportLevel: a.supportLevel,
+      path: a.path,
+      envVars: a.envVars,
+    }));
 
-    for (const p of providers) {
-      const exists = fs.existsSync(p.path);
-      console.log(`${p.name}: ${exists ? '✓' : 'Not found'}`);
+    if (options.provider) {
+      const def = getProviderDefinition(options.provider);
+      if (!def) {
+        console.error(`Unknown provider "${options.provider}".`);
+        return;
+      }
+      const guidance = providerGuidance(def.id);
+      if (options.json) {
+        console.log(JSON.stringify({ provider: def.id, label: def.label, guidance }, null, 2));
+        return;
+      }
+      console.log(`\n${def.label} setup\n`);
+      for (const line of guidance) console.log(`  ${line}`);
+      return;
     }
 
+    if (options.json) {
+      console.log(
+        JSON.stringify(
+          { node: { version: nodeVersion, ok: nodeOk }, database: { path: dbPath, ok: dbOk }, providers: providerReport },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+
+    console.log('\nSystem Health Check:\n');
+    console.log(`Node.js: ${nodeVersion} ${nodeOk ? '✓' : '✗ (v20+ required)'}`);
+    console.log(`Database: ${dbOk ? `${dbPath} ✓` : '✗ failed to open'}`);
+    console.log('\nProviders:');
+    for (const a of providerReport) {
+      console.log(`  ${a.label.padEnd(18)} ${a.installed ? 'detected' : 'not found'}`);
+    }
     console.log('\nHealth check complete');
   });
 
@@ -557,18 +747,92 @@ program
       );
     }
 
+    refreshUsageRollups(sqlite);
     console.log(`Generated ${count} sample sessions`);
   });
+
+/** Walk up from the CLI location to find the monorepo root (has pnpm-workspace.yaml). */
+function findRepoRoot(): string | null {
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i++) {
+    if (fs.existsSync(path.join(dir, 'pnpm-workspace.yaml'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/** Open a URL in the default browser, cross-platform. */
+async function openBrowser(url: string): Promise<void> {
+  const { spawn } = await import('child_process');
+  const cmd =
+    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  try {
+    spawn(cmd, [url], { stdio: 'ignore', detached: true, shell: process.platform === 'win32' }).unref();
+  } catch {
+    // Best effort — the URL is already printed.
+  }
+}
+
+/** Find the first existing SQLite file among a provider's default paths. */
+function findSqliteFile(provider: string): string | null {
+  const def = getProviderDefinition(provider);
+  if (!def) return null;
+  const candidates = [
+    ...getProviderDefaultPaths(provider as Provider).filter((p) => p.endsWith('.db')),
+    ...def.detectDirs.map((d) => expandPath(d)).filter((d): d is string => Boolean(d)),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+  }
+  return null;
+}
+
+/** Heuristic: does this table look like it holds session/message usage data? */
+function looksLikeUsageTable(name: string, columns: string[]): boolean {
+  const n = name.toLowerCase();
+  const cols = columns.map((c) => c.toLowerCase());
+  const nameHit = ['message', 'session', 'usage', 'conversation', 'turn', 'chat'].some((k) =>
+    n.includes(k),
+  );
+  const colHit = cols.some((c) => c.includes('token') || c.includes('cost') || c.includes('model'));
+  return nameHit || colHit;
+}
+
+/** Provider-specific setup guidance shown by `doctor --provider`. */
+function providerGuidance(provider: Provider): string[] {
+  const def = getProviderDefinition(provider);
+  const base = [
+    `Support level: ${def?.supportLevel ?? 'unknown'}`,
+    `Default paths: ${def?.defaultPaths.join(', ') ?? '(none)'}`,
+    def?.envVars.length ? `Env overrides: ${def.envVars.join(', ')}` : 'Env overrides: (none)',
+  ];
+  if (provider === 'copilot') {
+    base.push(
+      'Enable OpenTelemetry export before your sessions:',
+      '  export COPILOT_OTEL_ENABLED=true',
+      '  export COPILOT_OTEL_EXPORTER_TYPE=file',
+      '  export COPILOT_OTEL_FILE_EXPORTER_PATH=~/.copilot/otel/usage.jsonl',
+      'Usage from sessions before this was enabled cannot be recovered.',
+    );
+  }
+  if (def && ['opencode', 'goose', 'kilo', 'hermes'].includes(provider)) {
+    base.push(`Inspect its schema with: agent-usage inspect-schema --provider ${provider}`);
+  }
+  return base;
+}
 
 type SyncAgent = Provider | 'all';
 
 function parseSyncAgent(value?: string): SyncAgent | undefined {
   if (!value) return undefined;
   const normalized = value.toLowerCase();
-  if (normalized === 'all' || normalized === 'codex' || normalized === 'claude' || normalized === 'gemini') {
+  if (normalized === 'all') return 'all';
+  if (isKnownProvider(normalized) && getProviderDefinition(normalized)?.hasParser) {
     return normalized;
   }
-  throw new Error(`Invalid agent "${value}". Use all, codex, claude, or gemini.`);
+  throw new Error(`Invalid agent "${value}". Use one of: all, ${providersWithParser().join(', ')}.`);
 }
 
 async function chooseSyncAgent(
@@ -608,7 +872,7 @@ function getSelectedProviders(
 ): Provider[] {
   if (choice === 'all') {
     if (installed.length === 0 && hasCustomPaths) {
-      return ['codex', 'claude', 'gemini'];
+      return providersWithParser();
     }
     return installed.map((agent) => agent.provider);
   }
@@ -656,12 +920,7 @@ function formatProviderList(providers: Provider[]) {
 }
 
 function providerDisplayName(provider: Provider): string {
-  const labels: Record<Provider, string> = {
-    claude: 'Claude',
-    codex: 'Codex',
-    gemini: 'Gemini',
-  };
-  return labels[provider];
+  return getProviderDefinition(provider)?.label ?? provider;
 }
 
 function createSpinner(label: string) {

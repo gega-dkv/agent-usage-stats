@@ -21,17 +21,18 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const database = await getDb();
-    const { getSetting, setSetting } = await import('@agent-usage/db');
+    const { setSetting, purgeContent } = await import('@agent-usage/db');
     const body = await request.json();
 
     if (body.privacyMode) {
       setSetting(database.db, 'privacyMode', body.privacyMode);
     }
+    let purged: { messages: number; fts: number } | undefined;
     if (body.purgeContent) {
-      database.sqlite.exec("UPDATE messages SET content_text = NULL, raw = NULL");
+      purged = purgeContent(database.sqlite);
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, purged });
   } catch (e) {
     console.error('API /privacy POST error:', e);
     return NextResponse.json(

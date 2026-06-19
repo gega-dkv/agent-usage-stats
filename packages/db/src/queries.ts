@@ -4,20 +4,19 @@ import * as schema from './schema.js';
 import type { Provider, NormalizedSession, StatsSummary } from '@agent-usage/shared';
 
 export function upsertSession(db: AppDatabase['db'], session: NormalizedSession, fileHash: string) {
+  // Upsert by primary key (the provider's stable session id) so a single file
+  // containing multiple sessions is ingested correctly and re-scans are
+  // idempotent. The file hash is recorded for provenance/change detection.
   const existing = db
     .select()
     .from(schema.sessions)
-    .where(
-      and(
-        eq(schema.sessions.provider, session.provider),
-        eq(schema.sessions.fileHash, fileHash),
-      ),
-    )
+    .where(eq(schema.sessions.id, session.id))
     .get();
 
   if (existing) {
     db.update(schema.sessions)
       .set({
+        fileHash,
         updatedAt: session.updatedAt || new Date().toISOString(),
         inputTokens: session.totals.inputTokens,
         outputTokens: session.totals.outputTokens,
@@ -61,6 +60,12 @@ export function upsertMessages(
 ) {
   // Delete existing messages for this session first
   db.delete(schema.messages).where(eq(schema.messages.sessionId, sessionId)).run();
+  // Keep the FTS index in sync (best-effort — table may not exist).
+  try {
+    db.run(sql`DELETE FROM messages_fts WHERE session_id = ${sessionId}`);
+  } catch {
+    // FTS unavailable.
+  }
 
   for (const msg of messages) {
     db.insert(schema.messages)
@@ -82,6 +87,17 @@ export function upsertMessages(
         raw: msg.raw ? JSON.stringify(msg.raw) : undefined,
       })
       .run();
+
+    // Only index real content (omitted under privacy mode `disabled`).
+    if (msg.contentText) {
+      try {
+        db.run(
+          sql`INSERT INTO messages_fts (message_id, session_id, content) VALUES (${msg.id}, ${sessionId}, ${msg.contentText})`,
+        );
+      } catch {
+        // FTS unavailable.
+      }
+    }
   }
 }
 
@@ -213,6 +229,25 @@ export function getMonthlyUsage(
     .all();
 }
 
+export function getYearlyUsage(
+  db: AppDatabase['db'],
+  options?: { from?: string; to?: string; provider?: Provider },
+) {
+  const conditions = [];
+  if (options?.from) conditions.push(gte(schema.usageYearly.year, options.from));
+  if (options?.to) conditions.push(lte(schema.usageYearly.year, options.to));
+  if (options?.provider) conditions.push(eq(schema.usageYearly.provider, options.provider));
+
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+  return db
+    .select()
+    .from(schema.usageYearly)
+    .where(where)
+    .orderBy(asc(schema.usageYearly.year))
+    .all();
+}
+
 export function getStatsSummary(db: AppDatabase['db'], options?: { from?: string; to?: string }) {
   const conditions = [];
   if (options?.from) conditions.push(gte(schema.sessions.updatedAt, options.from));
@@ -303,38 +338,108 @@ export function getStatsSummary(db: AppDatabase['db'], options?: { from?: string
   } satisfies StatsSummary;
 }
 
+/** Turn a free-text query into a safe FTS5 MATCH expression (AND of terms). */
+function toFtsMatch(query: string): string {
+  return query
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((term) => `"${term.replace(/"/g, '')}"`)
+    .join(' ');
+}
+
 export function searchMessages(
   db: AppDatabase['db'],
   query: string,
   options?: { provider?: Provider; limit?: number },
 ) {
-  const conditions = [
-    sql`${schema.messages.contentText} LIKE ${`%${query}%`}`,
-  ];
-  if (options?.provider) {
-    conditions.push(
-      sql`${schema.messages.sessionId} IN (SELECT id FROM sessions WHERE provider = ${options.provider})`,
-    );
+  const limit = options?.limit || 50;
+
+  const select = () => {
+    const base = db
+      .select({
+        id: schema.messages.id,
+        sessionId: schema.messages.sessionId,
+        timestamp: schema.messages.timestamp,
+        role: schema.messages.role,
+        model: schema.messages.model,
+        contentPreview: schema.messages.contentPreview,
+        inputTokens: schema.messages.inputTokens,
+        outputTokens: schema.messages.outputTokens,
+        provider: schema.sessions.provider,
+        projectName: schema.sessions.projectName,
+      })
+      .from(schema.messages)
+      .innerJoin(schema.sessions, eq(schema.messages.sessionId, schema.sessions.id));
+    return base;
+  };
+
+  // Prefer FTS5 when the virtual table exists and has matching rows.
+  const match = toFtsMatch(query);
+  if (match) {
+    try {
+      const conditions = [
+        sql`${schema.messages.id} IN (SELECT message_id FROM messages_fts WHERE messages_fts MATCH ${match})`,
+      ];
+      if (options?.provider) conditions.push(eq(schema.sessions.provider, options.provider));
+
+      const ftsResults = select()
+        .where(and(...conditions))
+        .orderBy(desc(schema.messages.timestamp))
+        .limit(limit)
+        .all();
+
+      if (ftsResults.length > 0) return ftsResults;
+    } catch {
+      // FTS unavailable or query rejected — fall through to LIKE.
+    }
   }
 
-  return db
-    .select({
-      id: schema.messages.id,
-      sessionId: schema.messages.sessionId,
-      timestamp: schema.messages.timestamp,
-      role: schema.messages.role,
-      model: schema.messages.model,
-      contentPreview: schema.messages.contentPreview,
-      inputTokens: schema.messages.inputTokens,
-      outputTokens: schema.messages.outputTokens,
-      provider: schema.sessions.provider,
-      projectName: schema.sessions.projectName,
-    })
-    .from(schema.messages)
-    .innerJoin(schema.sessions, eq(schema.messages.sessionId, schema.sessions.id))
+  const conditions = [
+    sql`(${schema.messages.contentText} LIKE ${`%${query}%`} OR ${schema.messages.contentPreview} LIKE ${`%${query}%`})`,
+  ];
+  if (options?.provider) conditions.push(eq(schema.sessions.provider, options.provider));
+
+  return select()
     .where(and(...conditions))
     .orderBy(desc(schema.messages.timestamp))
-    .limit(options?.limit || 50)
+    .limit(limit)
+    .all();
+}
+
+/** Permanently clear all stored content + raw records; returns rows affected. */
+export function purgeContent(sqlite: AppDatabase['sqlite']): {
+  messages: number;
+  fts: number;
+} {
+  const messagesResult = sqlite
+    .prepare(
+      "UPDATE messages SET content_text = NULL, raw = NULL, tool_input_preview = NULL, tool_output_preview = NULL, content_preview = '[purged]'",
+    )
+    .run();
+  let fts = 0;
+  try {
+    fts = sqlite.prepare('DELETE FROM messages_fts').run().changes;
+  } catch {
+    // FTS unavailable.
+  }
+  return { messages: messagesResult.changes, fts };
+}
+
+/** Aggregate session/usage stats grouped by provider (for the Providers page). */
+export function getProviderUsageStats(db: AppDatabase['db']) {
+  return db
+    .select({
+      provider: schema.sessions.provider,
+      sessions: sql<number>`count(*)`,
+      sessionsWithTokens: sql<number>`sum(case when ${schema.sessions.totalTokens} > 0 then 1 else 0 end)`,
+      estimatedSessions: sql<number>`sum(case when ${schema.sessions.costEstimated} = 1 then 1 else 0 end)`,
+      totalTokens: sql<number>`coalesce(sum(${schema.sessions.totalTokens}), 0)`,
+      totalCost: sql<number>`coalesce(sum(${schema.sessions.estimatedCost}), 0)`,
+      lastSeen: sql<string>`max(coalesce(${schema.sessions.updatedAt}, ${schema.sessions.startedAt}, ${schema.sessions.createdAt}))`,
+    })
+    .from(schema.sessions)
+    .groupBy(schema.sessions.provider)
     .all();
 }
 
