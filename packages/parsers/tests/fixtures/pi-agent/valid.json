@@ -1,0 +1,7 @@
+{
+  "sessionId": "pi-json-1",
+  "messages": [
+    { "role": "user", "content": "json session", "usage": { "input_tokens": 40, "output_tokens": 0 } },
+    { "role": "assistant", "content": "reply", "usage": { "output_tokens": 12 } }
+  ]
+}

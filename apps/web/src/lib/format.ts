@@ -1,3 +1,5 @@
+import { getProviderDefinition } from '@agent-usage/shared';
+
 export function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
@@ -58,14 +60,7 @@ export function providerBadge(provider: string): string {
 }
 
 export function providerLabel(provider: string): string {
-  switch (provider) {
-    case 'claude':
-      return 'Claude';
-    case 'codex':
-      return 'Codex';
-    case 'gemini':
-      return 'Gemini';
-    default:
-      return provider;
-  }
+  const def = getProviderDefinition(provider);
+  if (def) return def.label;
+  return provider;
 }

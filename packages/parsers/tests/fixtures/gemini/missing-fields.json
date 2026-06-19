@@ -1,0 +1,15 @@
+{
+  "chatId": "gemini-missing",
+  "messages": [
+    {
+      "role": "user",
+      "parts": [{"text": "No usageMetadata on this message"}],
+      "createTime": "2026-06-17T14:00:00Z"
+    },
+    {
+      "role": "model",
+      "parts": [{"text": "Reply without usage either"}],
+      "createTime": "2026-06-17T14:01:00Z"
+    }
+  ]
+}

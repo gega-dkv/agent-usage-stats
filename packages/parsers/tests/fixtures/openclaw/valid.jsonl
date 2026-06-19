@@ -1,0 +1,3 @@
+{"type":"model_change","model":"gpt-4o","timestamp":"2026-06-18T09:00:00Z"}
+{"role":"user","content":"Plan the migration","usage":{"input":800,"output":0},"timestamp":"2026-06-18T09:01:00Z"}
+{"role":"assistant","content":"Here is a migration plan.","usage":{"input":0,"output":450},"cost":{"total":0.012},"timestamp":"2026-06-18T09:02:00Z"}

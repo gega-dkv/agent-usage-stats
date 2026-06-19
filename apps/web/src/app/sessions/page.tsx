@@ -1,8 +1,30 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Search } from 'lucide-react';
 import { formatNumber, formatCurrency, formatDate, providerLabel, providerBadge } from '@/lib/format';
+import { listProviderIds, getProviderDefinition } from '@agent-usage/shared';
 import { ScanButton } from '@/components/scan-button';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 type Session = {
   id: string;
@@ -18,15 +40,24 @@ type Session = {
   totalTokens: number;
   estimatedCost: number;
   model?: string;
+  supportLevel?: string;
+  usageConfidence?: string;
+  costEstimated?: boolean;
+  tokenUsageEstimated?: boolean;
 };
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sortField, setSortField] = useState<'date' | 'cost' | 'tokens'>('date');
+  const [sortField, setSortField] = useState<'date' | 'cost' | 'tokens' | 'provider' | 'model'>('date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [providerFilter, setProviderFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+
+  const providerOptions = listProviderIds().map((id) => ({
+    id,
+    label: getProviderDefinition(id)?.label ?? id,
+  }));
 
   const fetchSessions = () => {
     setLoading(true);
@@ -60,9 +91,15 @@ export default function SessionsPage() {
         return ((a.updatedAt || '').localeCompare(b.updatedAt || '') * dir);
       }
       if (sortField === 'cost') {
-        return ((a.estimatedCost - b.estimatedCost) * dir);
+        return (a.estimatedCost - b.estimatedCost) * dir;
       }
-      return ((a.totalTokens - b.totalTokens) * dir);
+      if (sortField === 'provider') {
+        return a.provider.localeCompare(b.provider) * dir;
+      }
+      if (sortField === 'model') {
+        return (a.model || '').localeCompare(b.model || '') * dir;
+      }
+      return (a.totalTokens - b.totalTokens) * dir;
     });
 
   return (
@@ -78,55 +115,62 @@ export default function SessionsPage() {
         <ScanButton variant="compact" />
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm">
-        <div className="flex items-center gap-2">
-          <svg className="h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="8" />
-            <path d="M21 21l-4.35-4.35" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search sessions…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-48 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Search className="size-4 text-muted-foreground" />
+            <Input
+              type="text"
+              placeholder="Search sessions…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-48"
+            />
+          </div>
+          <div className="h-6 w-px bg-border" />
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs text-muted-foreground">Provider</Label>
+            <Select value={providerFilter} onValueChange={setProviderFilter}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                {providerOptions.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="ml-auto flex items-end gap-2">
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs text-muted-foreground">Sort</Label>
+              <Select value={sortField} onValueChange={(v) => setSortField(v as typeof sortField)}>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="date">Date</SelectItem>
+                  <SelectItem value="cost">Cost</SelectItem>
+                  <SelectItem value="tokens">Tokens</SelectItem>
+                  <SelectItem value="provider">Provider</SelectItem>
+                  <SelectItem value="model">Model</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
+              title="Toggle sort direction"
+            >
+              {sortDirection === 'asc' ? '↑' : '↓'}
+            </Button>
+          </div>
         </div>
-        <div className="h-6 w-px bg-border" />
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Provider:</span>
-          <select
-            value={providerFilter}
-            onChange={(e) => setProviderFilter(e.target.value)}
-            className="rounded-md border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="all">All</option>
-            <option value="claude">Claude</option>
-            <option value="codex">Codex</option>
-            <option value="gemini">Gemini</option>
-          </select>
-        </div>
-        <div className="ml-auto flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Sort:</span>
-          <select
-            value={sortField}
-            onChange={(e) => setSortField(e.target.value as any)}
-            className="rounded-md border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="date">Date</option>
-            <option value="cost">Cost</option>
-            <option value="tokens">Tokens</option>
-          </select>
-          <button
-            onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input bg-background hover:bg-accent"
-            title="Toggle sort direction"
-          >
-            {sortDirection === 'asc' ? '↑' : '↓'}
-          </button>
-        </div>
-      </div>
+      </Card>
 
       {/* Table */}
       {loading ? (
@@ -148,63 +192,69 @@ export default function SessionsPage() {
           </p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-border bg-muted/30">
-                <tr className="text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  <th className="px-4 py-3">Provider</th>
-                  <th className="px-4 py-3">Project</th>
-                  <th className="px-4 py-3">Model</th>
-                  <th className="px-4 py-3">Updated</th>
-                  <th className="px-4 py-3 text-right">Input</th>
-                  <th className="px-4 py-3 text-right">Output</th>
-                  <th className="px-4 py-3 text-right">Total</th>
-                  <th className="px-4 py-3 text-right">Cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((s) => (
-                  <tr
-                    key={s.id}
-                    className="border-b border-border text-sm last:border-0 transition hover:bg-muted/30"
-                  >
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${providerBadge(
-                          s.provider,
-                        )}`}
-                      >
-                        {providerLabel(s.provider)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-medium text-foreground">
-                      {s.projectName || <span className="text-muted-foreground">—</span>}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                      {s.model || '—'}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {formatDate(s.updatedAt)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-xs">
-                      {formatNumber(s.inputTokens)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-xs">
-                      {formatNumber(s.outputTokens)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono font-semibold">
-                      {formatNumber(s.totalTokens)}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono font-semibold text-foreground">
-                      {formatCurrency(s.estimatedCost)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <Card>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Provider</TableHead>
+                <TableHead>Project</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Updated</TableHead>
+                <TableHead className="text-right">Input</TableHead>
+                <TableHead className="text-right">Output</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead>Quality</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((s) => (
+                <TableRow
+                  key={s.id}
+                  className="cursor-pointer"
+                  onClick={() => {
+                    window.location.href = `/sessions/${encodeURIComponent(s.id)}`;
+                  }}
+                >
+                  <TableCell>
+                    <Badge variant="outline" className={providerBadge(s.provider)}>
+                      {providerLabel(s.provider)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="font-medium">
+                    {s.projectName || <span className="text-muted-foreground">—</span>}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {s.model || '—'}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{formatDate(s.updatedAt)}</TableCell>
+                  <TableCell className="text-right font-mono text-xs">
+                    {formatNumber(s.inputTokens)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs">
+                    {formatNumber(s.outputTokens)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono font-semibold">
+                    {formatNumber(s.totalTokens)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {s.supportLevel ? <Badge variant="secondary">{s.supportLevel}</Badge> : null}
+                      {s.usageConfidence ? (
+                        <Badge variant="secondary">{s.usageConfidence}</Badge>
+                      ) : null}
+                      {s.costEstimated ? <Badge variant="outline">est. cost</Badge> : null}
+                      {s.tokenUsageEstimated ? <Badge variant="outline">est. tokens</Badge> : null}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-right font-mono font-semibold">
+                    {formatCurrency(s.estimatedCost)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </div>
   );

@@ -2,15 +2,24 @@
 
 import { useEffect, useState } from 'react';
 import { ScanButton } from '@/components/scan-button';
-import { formatNumber, formatCurrency } from '@/lib/format';
+import { formatNumber, formatCurrency, formatDateTime } from '@/lib/format';
 
 type ProviderUsage = {
   sessions: number;
   sessionsWithTokens: number;
+  exactUsageSessions: number;
+  metadataOnlySessions: number;
   estimatedSessions: number;
   totalTokens: number;
   totalCost: number;
   lastSeen: string | null;
+};
+
+type ParserWarning = {
+  file: string;
+  message: string;
+  severity: string;
+  code?: string;
 };
 
 type ProviderAgent = {
@@ -23,6 +32,13 @@ type ProviderAgent = {
   envVars: string[];
   sessionPatterns: string[];
   usage: ProviderUsage | null;
+  lastScan: {
+    completedAt: string | null;
+    filesScanned: number;
+    sessionsFound: number;
+    warningsCount: number;
+  } | null;
+  warnings: ParserWarning[];
 };
 
 const SUPPORT_BADGE: Record<string, string> = {
@@ -88,7 +104,6 @@ export default function ProvidersPage() {
                   className={`inline-flex h-2.5 w-2.5 flex-shrink-0 rounded-full ${
                     agent.installed ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
                   }`}
-                  title={agent.installed ? 'Detected' : 'Not detected'}
                 />
               </div>
 
@@ -99,18 +114,15 @@ export default function ProvidersPage() {
                 <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
                   {agent.hasParser ? 'parser' : 'detect only'}
                 </span>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                  {agent.installed ? 'detected' : 'not found'}
-                </span>
               </div>
 
               {agent.usage && agent.usage.sessions > 0 ? (
-                <div className="grid grid-cols-3 gap-2 rounded-lg border border-border bg-muted/30 p-3 text-center">
+                <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-muted/30 p-3 text-center text-xs">
                   <Stat label="Sessions" value={String(agent.usage.sessions)} />
+                  <Stat label="Exact usage" value={String(agent.usage.exactUsageSessions ?? 0)} />
+                  <Stat label="Metadata only" value={String(agent.usage.metadataOnlySessions ?? 0)} />
                   <Stat label="Tokens" value={formatNumber(agent.usage.totalTokens)} />
                   <Stat label="Cost" value={formatCurrency(agent.usage.totalCost)} />
-                  <Stat label="With usage" value={String(agent.usage.sessionsWithTokens)} />
-                  <Stat label="Estimated" value={String(agent.usage.estimatedSessions)} />
                   <Stat
                     label="Last seen"
                     value={agent.usage.lastSeen ? agent.usage.lastSeen.slice(0, 10) : '—'}
@@ -122,6 +134,28 @@ export default function ProvidersPage() {
                 </p>
               )}
 
+              {agent.lastScan && (
+                <p className="text-[11px] text-muted-foreground">
+                  Last scan: {formatDateTime(agent.lastScan.completedAt ?? undefined)} ·{' '}
+                  {agent.lastScan.sessionsFound} sessions · {agent.lastScan.warningsCount} warnings
+                </p>
+              )}
+
+              {agent.warnings.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-2 dark:border-amber-900 dark:bg-amber-950/20">
+                  <p className="text-[10px] font-medium text-amber-800 dark:text-amber-200">
+                    Recent warnings
+                  </p>
+                  <ul className="mt-1 space-y-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                    {agent.warnings.map((w) => (
+                      <li key={w.file + w.message} className="truncate" title={w.message}>
+                        {w.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="mt-auto space-y-1 text-[11px] text-muted-foreground">
                 <div className="truncate" title={agent.path}>
                   <span className="font-medium text-foreground/70">Path:</span> {agent.path}
@@ -130,6 +164,12 @@ export default function ProvidersPage() {
                   <div className="truncate">
                     <span className="font-medium text-foreground/70">Env:</span>{' '}
                     {agent.envVars.join(', ')}
+                  </div>
+                )}
+                {agent.sessionPatterns?.length > 0 && (
+                  <div className="truncate" title={agent.sessionPatterns.join(', ')}>
+                    <span className="font-medium text-foreground/70">Patterns:</span>{' '}
+                    {agent.sessionPatterns[0]}
                   </div>
                 )}
               </div>

@@ -6,9 +6,9 @@ import type {
   ParserOptions,
   NormalizedSession,
   NormalizedMessage,
-  TokenTotals,
 } from '@agent-usage/shared';
-import { generateId, truncateText, estimateTokensFromText, emptyTokenTotals } from '@agent-usage/shared';
+import { generateId, truncateText, estimateTokensFromText, totalsFromMessages } from '@agent-usage/shared';
+import { shouldStoreRaw } from './parser-helpers.js';
 
 type GeminiMessage = {
   role?: string;
@@ -105,11 +105,11 @@ export const geminiParser: ProviderParser = {
               : contentPreview,
           inputTokens: estInput,
           outputTokens: estOutput,
-          raw: options?.privacyMode === 'raw' ? msg : undefined,
+          raw: shouldStoreRaw(options) ? msg : undefined,
         });
       }
 
-      const totals = computeSessionTotals(normalizedMessages);
+      const totals = totalsFromMessages(normalizedMessages);
 
       sessions.push({
         id: sessionId,
@@ -126,6 +126,7 @@ export const geminiParser: ProviderParser = {
         file: filePath,
         message: `Failed to parse Gemini file: ${e instanceof Error ? e.message : String(e)}`,
         severity: 'error',
+        code: 'json-parse-error',
       });
     }
 
@@ -153,17 +154,4 @@ function extractGeminiText(parts: GeminiMessage['parts']): string {
     .filter((p) => p.text)
     .map((p) => p.text!)
     .join('\n');
-}
-
-function computeSessionTotals(messages: NormalizedMessage[]): TokenTotals {
-  const totals = emptyTokenTotals();
-  for (const msg of messages) {
-    totals.inputTokens += msg.inputTokens || 0;
-    totals.outputTokens += msg.outputTokens || 0;
-    totals.cachedInputTokens += msg.cachedInputTokens || 0;
-    totals.reasoningTokens += msg.reasoningTokens || 0;
-  }
-  totals.totalTokens =
-    totals.inputTokens + totals.outputTokens + totals.cachedInputTokens + totals.reasoningTokens;
-  return totals;
 }

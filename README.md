@@ -62,17 +62,64 @@ Run `pnpm cli providers` to see which are detected on your machine.
 
 ### Installation
 
+#### From git checkout (development)
+
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/agent-usage-stats.git
+git clone https://github.com/gega-dkv/agent-usage-stats.git
 cd agent-usage-stats
 
 # Install dependencies
 pnpm install
 
-# Start the web dashboard
+# Build all packages (includes bundling the web dashboard into the CLI)
+pnpm build
+
+# Start the web dashboard (development)
 pnpm dev
 ```
+
+#### Global CLI install (from monorepo build)
+
+After `pnpm build`, install the CLI globally:
+
+```bash
+pnpm link --global --filter @agent-usage/cli
+```
+
+Then use `agent-usage` from any directory:
+
+```bash
+agent-usage sync
+agent-usage dashboard    # serves bundled web/ on http://127.0.0.1:3000
+```
+
+When published to npm:
+
+```bash
+npm install -g @agent-usage/cli
+agent-usage dashboard
+```
+
+See [`apps/cli/README.md`](apps/cli/README.md) and [`docs/HOMEBREW.md`](docs/HOMEBREW.md) for package layout and optional Homebrew template.
+
+#### Desktop app (Tauri)
+
+Requires Rust and platform SDKs — see [`apps/desktop/README.md`](apps/desktop/README.md).
+
+```bash
+pnpm build          # required first
+pnpm desktop:dev    # local webview + embedded dashboard on 127.0.0.1:3847
+pnpm desktop:build  # native bundle (optional; not run in CI)
+```
+
+### Platform notes
+
+- **macOS** is the primary development and verification platform. Default provider paths (`~/.claude`, `~/.codex`, `~/.gemini`, etc.) are tested here first.
+- **Linux** uses the same `$XDG_CONFIG_HOME` / `~/.config` conventions for the app database (`~/.config/agent-usage-stats/stats.db`). Provider paths honor `$ENV` overrides in the registry (e.g. `$CODEX_HOME`, `$OPENCODE_DATA_DIR`).
+- **Windows** path expansion uses `%USERPROFILE%` via Node’s `os.homedir()` and registry `$ENV` placeholders. Full Windows path QA is a milestone — report issues if a provider’s default path does not resolve on your machine.
+
+Run `agent-usage doctor` on any platform to confirm Node, database, and detected providers.
 
 ### CLI Usage
 
@@ -88,9 +135,10 @@ pnpm cli scan --provider claude
 pnpm cli providers
 pnpm cli providers detect --json
 
-# Usage stats (summary, or --day / --month / --year, with --from/--to)
+# Usage stats (summary, or --day / --week / --month / --year, with --from/--to)
 pnpm cli stats
-pnpm cli stats --day --from 2026-01-01 --to 2026-06-30
+pnpm cli stats --week --from 2026-01-01 --to 2026-06-30
+pnpm cli stats --granularity week --json
 
 # Full-text prompt search (requires privacy mode that stores content)
 pnpm cli prompts --search "refactor auth"
@@ -104,6 +152,18 @@ pnpm cli doctor --provider copilot
 
 # Launch the local web dashboard
 pnpm cli dashboard
+pnpm cli dashboard --json
+
+# Watch for file changes (500ms debounce; emits JSON events with --json)
+pnpm cli watch --json
+
+# Export usage and sessions
+pnpm cli stats export --day --format csv -o usage.csv
+pnpm cli sessions export --format json
+
+# Scan history and parser warnings
+pnpm cli scan history --json
+pnpm cli warnings --json
 
 # Manage pricing
 pnpm cli pricing list
@@ -115,6 +175,41 @@ pnpm cli privacy purge-content
 ```
 
 Every command supports `--json` for scripting.
+
+## Sync and Watch
+
+### `sync`
+
+Detects installed AI agents (via the provider registry), lets you choose which to ingest, and runs a scan for each.
+
+- **Interactive (TTY):** Lists detected agents and prompts for a selection when more than one is installed.
+- **Non-TTY / piped stdin:** Auto-selects the first installed agent (or all when using `--agent all`).
+- **`--json`:** Skips prompts and animations; returns `{ agents, selectedProviders, filesScanned, ... }`.
+- **`--agent` / `--provider`:** Limit to one provider or `all`.
+- **`--path`:** Include custom paths in the scan.
+
+```bash
+pnpm cli sync
+pnpm cli sync --agent claude
+pnpm cli sync --json
+```
+
+### `watch`
+
+Watches default provider session paths for new or changed files and re-scans automatically.
+
+- **Debounce:** 500 ms after the last file event before scanning; chokidar waits 1 s for writes to finish (`awaitWriteFinish`).
+- **Non-TTY:** No spinner or status animation; use `--json` for machine-readable events.
+- **`--json`:** Emits JSON lines: `watch_started`, `file_changed`, and `scan_complete` (with scan stats).
+
+```bash
+pnpm cli watch
+pnpm cli watch --provider claude --json
+```
+
+## Explicit Non-Goals
+
+The following are **not** planned for v1: billing API sync, budgets/alerts, cloud/team features, and real invoice reconciliation. See `IMPLEMENTATION_PLAN.md` for the full list.
 
 ## Configuration
 
@@ -156,22 +251,37 @@ Create `agent-usage.config.json` in your project root:
 
 ## Pricing
 
-Costs are simulated API-equivalent estimates. Edit pricing in the web UI or import/export JSON:
+Costs are simulated API-equivalent estimates loaded from a local bundled snapshot and your SQLite database — pricing is never fetched from the internet at runtime. Edit rates in the web UI or import/export JSON:
 
 ```bash
 # Export current pricing
 pnpm cli pricing export > pricing.json
 
-# Import custom pricing
+# Import custom pricing (array or { "models": [...], "modelAliases": {...} })
 pnpm cli pricing import pricing.json
 ```
+
+Model aliases map session model names (including provider-prefixed names like `anthropic/claude-sonnet-4` or `openrouter/google/gemini-2.5-pro`) to canonical pricing-table entries. Bundled aliases cover OpenAI/Codex, Anthropic, Gemini/Vertex, Qwen, and Moonshot/Kimi variants; override or extend them in `agent-usage.config.json`:
+
+```json
+{
+  "modelAliases": {
+    "my-internal-codename": "gpt-4o"
+  }
+}
+```
+
+When a model has no matching price, costs fall back to the provider default (e.g. `gpt-4o`, `claude-sonnet-4-20250514`) and are marked **estimated**.
+
+**Pricing profiles:** `api-standard` uses on-demand API list prices (default). `subscription-equivalent` is for comparing usage against flat subscription tiers (ChatGPT Plus, Claude Pro, etc.) — clone the profile in the web Pricing page and edit per-token rates to match your plan; these are not API list prices.
 
 ## Architecture
 
 ```
 agent-usage-stats/
 ├── apps/
-│   ├── cli/           # CLI tool
+│   ├── cli/           # CLI tool (+ bundled web/ after build)
+│   ├── desktop/       # Tauri desktop shell (optional)
 │   └── web/           # Next.js dashboard
 ├── packages/
 │   ├── core/          # Core scan engine (discover → parse → store → roll up)

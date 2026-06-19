@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { providerLabel } from '@/lib/format';
+import { Button } from '@/components/ui/button';
 
-type Provider = 'codex' | 'claude' | 'gemini';
-type SyncTarget = Provider | 'all';
+type SyncTarget = string;
 
 type AgentInstallation = {
-  provider: Provider;
+  provider: string;
   label: string;
   path: string;
   installed: boolean;
@@ -16,18 +17,20 @@ type AgentInstallation = {
 
 type ScanButtonProps = {
   variant?: 'default' | 'compact';
+  onComplete?: () => void;
 };
 
 const syncSteps = ['Detecting agents', 'Reading sessions', 'Writing local database', 'Refreshing charts'];
 
-export function ScanButton({ variant = 'default' }: ScanButtonProps) {
+export function ScanButton({ variant = 'default', onComplete }: ScanButtonProps) {
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{ filesScanned?: number; sessionsFound?: number } | null>(
+    null,
+  );
   const [agents, setAgents] = useState<AgentInstallation[]>([]);
   const [selected, setSelected] = useState<SyncTarget>('all');
-  const [result, setResult] = useState<{
-    type: 'success' | 'error';
-    message: string;
-  } | null>(null);
+  const [result, setResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const router = useRouter();
 
   const installedAgents = useMemo(
@@ -47,30 +50,75 @@ export function ScanButton({ variant = 'default' }: ScanButtonProps) {
       .catch(() => setAgents([]));
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  const pollScanStatus = (runId: number) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/scan?runId=${runId}`);
+        const data = await res.json();
+        const run = data.run;
+        if (!run) return;
+        setProgress({
+          filesScanned: run.filesScanned,
+          sessionsFound: run.sessionsFound,
+        });
+        if (run.status === 'completed' || run.status === 'failed') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          setLoading(false);
+          setProgress(null);
+          if (run.status === 'completed') {
+            setResult({
+              type: 'success',
+              message: `Synced ${run.sessionsFound} sessions from ${run.filesScanned} files`,
+            });
+            router.refresh();
+            onComplete?.();
+          } else {
+            setResult({ type: 'error', message: run.errors || 'Scan failed' });
+          }
+          setTimeout(() => setResult(null), 5000);
+        }
+      } catch {
+        // keep polling
+      }
+    }, 800);
+  };
+
   const handleScan = async () => {
     setLoading(true);
     setResult(null);
+    setProgress(null);
     try {
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: selected }),
+        body: JSON.stringify({ provider: selected, async: true }),
       });
       const data = await res.json();
       if (data.error) {
         setResult({ type: 'error', message: data.error });
+        setLoading(false);
+      } else if (data.runId) {
+        pollScanStatus(data.runId);
       } else {
         setResult({
           type: 'success',
-          message: `Synced ${data.sessionsFound} sessions from ${data.filesScanned} files`,
+          message: `Synced ${data.sessionsFound ?? 0} sessions`,
         });
+        setLoading(false);
         router.refresh();
+        onComplete?.();
+        setTimeout(() => setResult(null), 5000);
       }
     } catch (e) {
       setResult({ type: 'error', message: e instanceof Error ? e.message : String(e) });
-    } finally {
       setLoading(false);
-      setTimeout(() => setResult(null), 5000);
     }
   };
 
@@ -78,14 +126,16 @@ export function ScanButton({ variant = 'default' }: ScanButtonProps) {
 
   if (variant === 'compact') {
     return (
-      <button
-        onClick={handleScan}
-        disabled={disabled}
-        className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {loading ? <SpinnerIcon /> : <SyncIcon />}
-        {loading ? 'Syncing...' : installedAgents.length === 0 ? 'No agents found' : 'Sync'}
-      </button>
+      <Button onClick={handleScan} disabled={disabled} variant="outline" size="sm">
+        {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+        {loading
+          ? progress?.sessionsFound != null
+            ? `${progress.sessionsFound} sessions…`
+            : 'Syncing…'
+          : installedAgents.length === 0
+            ? 'No agents found'
+            : 'Sync'}
+      </Button>
     );
   }
 
@@ -99,32 +149,26 @@ export function ScanButton({ variant = 'default' }: ScanButtonProps) {
           ].map((target) => {
             const active = selected === target.value;
             return (
-              <button
+              <Button
                 key={target.value}
                 onClick={() => setSelected(target.value)}
                 disabled={loading}
-                className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
-                  active
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                }`}
+                variant={active ? 'default' : 'ghost'}
+                size="sm"
+                className="text-xs"
               >
                 {target.label}
-              </button>
+              </Button>
             );
           })}
         </div>
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <button
-          onClick={handleScan}
-          disabled={disabled}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loading ? <SpinnerIcon /> : <SyncIcon />}
-          {loading ? 'Syncing...' : syncButtonLabel(selected, installedAgents)}
-        </button>
+        <Button onClick={handleScan} disabled={disabled}>
+          {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+          {loading ? 'Syncing…' : syncButtonLabel(selected, installedAgents)}
+        </Button>
         {result && (
           <span
             className={`max-w-72 text-xs ${
@@ -138,18 +182,34 @@ export function ScanButton({ variant = 'default' }: ScanButtonProps) {
         )}
       </div>
 
-      {loading && <SyncAnimation target={selected} />}
+      {loading && (
+        <SyncAnimation
+          target={selected}
+          filesScanned={progress?.filesScanned}
+          sessionsFound={progress?.sessionsFound}
+        />
+      )}
     </div>
   );
 }
 
 function syncButtonLabel(selected: SyncTarget, installedAgents: AgentInstallation[]) {
   if (installedAgents.length === 0) return 'No agents found';
-  if (selected === 'all') return installedAgents.length > 1 ? 'Sync All' : `Sync ${installedAgents[0].label}`;
+  if (selected === 'all') {
+    return installedAgents.length > 1 ? 'Sync All' : `Sync ${installedAgents[0].label}`;
+  }
   return `Sync ${providerLabel(selected)}`;
 }
 
-function SyncAnimation({ target }: { target: SyncTarget }) {
+function SyncAnimation({
+  target,
+  filesScanned,
+  sessionsFound,
+}: {
+  target: SyncTarget;
+  filesScanned?: number;
+  sessionsFound?: number;
+}) {
   return (
     <div className="w-full max-w-sm overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="h-1 overflow-hidden bg-muted">
@@ -160,7 +220,10 @@ function SyncAnimation({ target }: { target: SyncTarget }) {
           <span className="text-xs font-semibold uppercase text-muted-foreground">
             {target === 'all' ? 'Local sync' : providerLabel(target)}
           </span>
-          <span className="font-mono text-[11px] text-muted-foreground">live</span>
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {sessionsFound != null ? `${sessionsFound} sessions` : 'polling…'}
+            {filesScanned != null ? ` · ${filesScanned} files` : ''}
+          </span>
         </div>
         <div className="grid grid-cols-2 gap-2">
           {syncSteps.map((step, index) => (
@@ -176,23 +239,5 @@ function SyncAnimation({ target }: { target: SyncTarget }) {
         </div>
       </div>
     </div>
-  );
-}
-
-function SyncIcon() {
-  return (
-    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-      <path d="M21 3v6h-6" />
-    </svg>
-  );
-}
-
-function SpinnerIcon() {
-  return (
-    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.3" />
-      <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-    </svg>
   );
 }

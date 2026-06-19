@@ -1,0 +1,20 @@
+{
+  "id": "thread-1",
+  "title": "Refactor API",
+  "model": "anthropic/claude-sonnet-4",
+  "provider": "anthropic",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Refactor the API layer",
+      "usage": { "input_tokens": 900, "output_tokens": 0, "cache_read_input_tokens": 100 }
+    },
+    {
+      "role": "assistant",
+      "content": "Starting refactor.",
+      "usage": { "input_tokens": 0, "output_tokens": 350, "cache_creation_input_tokens": 40 },
+      "credits": 2.5
+    }
+  ],
+  "usageLedger": { "input_tokens": 900, "output_tokens": 350, "credits": 2.5 }
+}

@@ -1,14 +1,30 @@
 {
   "name": "@agent-usage/cli",
   "version": "0.1.0",
-  "private": true,
+  "description": "Local-first AI session usage analyzer CLI",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "agent-usage": "./dist/index.js"
   },
   "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "web",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/bundle-web.mjs",
+    "bundle-web": "node scripts/bundle-web.mjs",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit"
   },
@@ -21,7 +37,10 @@
     "better-sqlite3": "^12.11.0",
     "chalk": "^5.3.0",
     "chokidar": "^4.0.0",
-    "commander": "^12.1.0"
+    "commander": "^12.1.0",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

@@ -1,9 +1,16 @@
-import type { TokenTotals, Provider, PricingProvider } from './types.js';
+import type { TokenTotals, Provider, PricingProvider, NormalizedMessage } from './types.js';
 import { PROVIDER_REGISTRY } from './providers.js';
 
 export function computeTotalTokens(totals: Omit<TokenTotals, 'totalTokens'>): number {
+  const cached =
+    totals.cachedInputTokens ||
+    (totals.cacheCreationTokens || 0) + (totals.cacheReadTokens || 0);
   return (
-    totals.inputTokens + totals.outputTokens + totals.cachedInputTokens + totals.reasoningTokens
+    totals.inputTokens +
+    totals.outputTokens +
+    cached +
+    (totals.toolTokens || 0) +
+    totals.reasoningTokens
   );
 }
 
@@ -12,19 +19,61 @@ export function emptyTokenTotals(): TokenTotals {
     inputTokens: 0,
     outputTokens: 0,
     cachedInputTokens: 0,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+    toolTokens: 0,
     reasoningTokens: 0,
     totalTokens: 0,
   };
 }
 
+/** Normalize legacy token fields into the expanded TokenTotals shape. */
+export function normalizeTokenTotals(totals: Partial<TokenTotals>): TokenTotals {
+  const cacheRead = totals.cacheReadTokens ?? totals.cachedInputTokens ?? 0;
+  const cacheCreation = totals.cacheCreationTokens ?? 0;
+  const cachedInput =
+    totals.cachedInputTokens ?? (cacheCreation > 0 || cacheRead > 0 ? cacheCreation + cacheRead : 0);
+  const normalized: TokenTotals = {
+    inputTokens: totals.inputTokens ?? 0,
+    outputTokens: totals.outputTokens ?? 0,
+    cachedInputTokens: cachedInput,
+    cacheCreationTokens: cacheCreation,
+    cacheReadTokens: cacheRead,
+    toolTokens: totals.toolTokens ?? 0,
+    reasoningTokens: totals.reasoningTokens ?? 0,
+    totalTokens: 0,
+  };
+  normalized.totalTokens = totals.totalTokens ?? computeTotalTokens(normalized);
+  return normalized;
+}
+
 export function addTokenTotals(a: TokenTotals, b: TokenTotals): TokenTotals {
-  return {
+  const merged = {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
     cachedInputTokens: a.cachedInputTokens + b.cachedInputTokens,
+    cacheCreationTokens: a.cacheCreationTokens + b.cacheCreationTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    toolTokens: a.toolTokens + b.toolTokens,
     reasoningTokens: a.reasoningTokens + b.reasoningTokens,
-    totalTokens: a.totalTokens + b.totalTokens,
   };
+  return { ...merged, totalTokens: computeTotalTokens(merged) };
+}
+
+/** Aggregate per-message token fields into session totals. */
+export function totalsFromMessages(messages: Array<Pick<NormalizedMessage, 'inputTokens' | 'outputTokens' | 'cachedInputTokens' | 'cacheCreationTokens' | 'cacheReadTokens' | 'toolTokens' | 'reasoningTokens'>>): TokenTotals {
+  const totals = emptyTokenTotals();
+  for (const msg of messages) {
+    totals.inputTokens += msg.inputTokens || 0;
+    totals.outputTokens += msg.outputTokens || 0;
+    totals.cacheCreationTokens += msg.cacheCreationTokens || 0;
+    totals.cacheReadTokens += msg.cacheReadTokens || msg.cachedInputTokens || 0;
+    totals.toolTokens += msg.toolTokens || 0;
+    totals.reasoningTokens += msg.reasoningTokens || 0;
+  }
+  totals.cachedInputTokens = totals.cacheCreationTokens + totals.cacheReadTokens;
+  totals.totalTokens = computeTotalTokens(totals);
+  return totals;
 }
 
 export function providerToPricingProvider(provider: Provider): PricingProvider {

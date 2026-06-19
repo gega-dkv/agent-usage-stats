@@ -1,0 +1,3 @@
+{"role":"user","usage":{"input":10}}
+{broken
+{"role":"assistant","usage":{"output":5},"cost":{"total":0.001}}

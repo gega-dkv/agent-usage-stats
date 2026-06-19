@@ -8,20 +8,46 @@ export async function GET() {
     const core = await getCore();
     const { loadConfig } = core;
     const { detectAgentInstallations } = await import('@agent-usage/parsers');
-    const { getProviderUsageStats } = await import('@agent-usage/db');
+    const {
+      getProviderUsageStats,
+      getLastScanByProvider,
+      getParserWarnings,
+      getScanRuns,
+    } = await import('@agent-usage/db');
     const database = await getDb();
     const config = loadConfig();
 
     const agents = detectAgentInstallations(config);
     const stats = getProviderUsageStats(database.db);
-    const statsByProvider = new Map(stats.map((s: { provider: string }) => [s.provider, s]));
+    const statsByProvider = new Map(stats.map((s) => [s.provider, s]));
+    const lastScans = getLastScanByProvider(database.db);
+    const recentWarnings = getParserWarnings(database.db, { limit: 50 });
+    const latestScan = getScanRuns(database.db, 1)[0] ?? null;
 
-    const merged = agents.map((agent: { provider: string }) => ({
-      ...agent,
-      usage: statsByProvider.get(agent.provider) ?? null,
-    }));
+    const merged = agents.map((agent) => {
+      const usage = statsByProvider.get(agent.provider) ?? null;
+      const lastScan =
+        lastScans.get(agent.provider) ?? lastScans.get('__all__') ?? null;
+      const warnings = recentWarnings.filter((w) =>
+        w.file.toLowerCase().includes(agent.provider),
+      );
 
-    return NextResponse.json({ agents: merged });
+      return {
+        ...agent,
+        usage,
+        lastScan: lastScan
+          ? {
+              completedAt: lastScan.completedAt,
+              filesScanned: lastScan.filesScanned,
+              sessionsFound: lastScan.sessionsFound,
+              warningsCount: lastScan.warningsCount,
+            }
+          : null,
+        warnings: warnings.slice(0, 5),
+      };
+    });
+
+    return NextResponse.json({ agents: merged, latestScan });
   } catch (e) {
     console.error('API /providers error:', e);
     return NextResponse.json(

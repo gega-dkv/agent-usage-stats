@@ -3,9 +3,12 @@ import type { Database as DatabaseType } from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
+import { runMigrations } from './migrations.js';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+
+export { CURRENT_SCHEMA_VERSION, getSchemaVersion, runMigrations } from './migrations.js';
 
 export type DbInstance = BetterSQLite3Database<typeof schema>;
 
@@ -53,18 +56,32 @@ export function initializeDatabase(dbPath?: string): AppDatabase {
       id TEXT PRIMARY KEY,
       provider TEXT NOT NULL,
       file_hash TEXT,
+      source_path TEXT,
+      storage_kind TEXT,
+      support_level TEXT,
+      usage_confidence TEXT,
       project_path TEXT,
       project_name TEXT,
       started_at TEXT,
       updated_at TEXT,
+      message_count INTEGER DEFAULT 0,
+      prompt_count INTEGER DEFAULT 0,
+      session_warnings TEXT,
+      raw_retention TEXT,
       input_tokens INTEGER DEFAULT 0,
       output_tokens INTEGER DEFAULT 0,
       cached_input_tokens INTEGER DEFAULT 0,
+      cache_creation_tokens INTEGER DEFAULT 0,
+      cache_read_tokens INTEGER DEFAULT 0,
+      tool_tokens INTEGER DEFAULT 0,
       reasoning_tokens INTEGER DEFAULT 0,
       total_tokens INTEGER DEFAULT 0,
+      token_usage_estimated INTEGER DEFAULT 0,
       estimated_cost REAL DEFAULT 0,
+      simulated_cost REAL DEFAULT 0,
       cost_estimated INTEGER DEFAULT 0,
       recorded_cost REAL,
+      pricing_source TEXT,
       model TEXT,
       metadata TEXT,
       created_at TEXT NOT NULL
@@ -78,10 +95,19 @@ export function initializeDatabase(dbPath?: string): AppDatabase {
       model TEXT,
       content_text TEXT,
       content_preview TEXT NOT NULL,
+      content_hidden INTEGER DEFAULT 0,
       input_tokens INTEGER,
       output_tokens INTEGER,
       cached_input_tokens INTEGER,
+      cache_creation_tokens INTEGER,
+      cache_read_tokens INTEGER,
+      tool_tokens INTEGER,
       reasoning_tokens INTEGER,
+      usage_confidence TEXT,
+      recorded_cost REAL,
+      simulated_cost REAL,
+      cost_estimated INTEGER DEFAULT 0,
+      message_metadata TEXT,
       tool_name TEXT,
       tool_input_preview TEXT,
       tool_output_preview TEXT,
@@ -174,6 +200,7 @@ export function initializeDatabase(dbPath?: string): AppDatabase {
       line INTEGER,
       message TEXT NOT NULL,
       severity TEXT NOT NULL,
+      code TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -181,6 +208,13 @@ export function initializeDatabase(dbPath?: string): AppDatabase {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS scanned_files (
+      path TEXT PRIMARY KEY,
+      file_hash TEXT NOT NULL,
+      mtime_ms INTEGER NOT NULL,
+      last_scanned_at TEXT NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_provider ON sessions(provider);
@@ -218,9 +252,7 @@ export function initializeDatabase(dbPath?: string): AppDatabase {
     // FTS5 unavailable — search falls back to LIKE.
   }
 
-  // Lightweight, idempotent migrations for DBs created before a column existed.
-  ensureColumn(sqlite, 'sessions', 'cost_estimated', 'INTEGER DEFAULT 0');
-  ensureColumn(sqlite, 'sessions', 'recorded_cost', 'REAL');
+  runMigrations(sqlite);
 
   return { db, sqlite, path: resolvedPath };
 }
@@ -237,19 +269,3 @@ export function hasFtsSupport(sqlite: DatabaseType): boolean {
   }
 }
 
-/** Adds a column to a table if it does not already exist (no-op otherwise). */
-function ensureColumn(
-  sqlite: DatabaseType,
-  table: string,
-  column: string,
-  definition: string,
-): void {
-  try {
-    const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-    if (!columns.some((c) => c.name === column)) {
-      sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-    }
-  } catch {
-    // Table may not exist yet on a brand-new DB; CREATE TABLE handled it.
-  }
-}

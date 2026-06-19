@@ -199,10 +199,38 @@ function resolvePattern(pattern: string): string {
 
 /** Detect a provider from a file path (and, as a fallback, its contents). */
 export function detectProvider(filePath: string): Provider {
-  // Match against registry detect-dir hints first (e.g. ".claude", ".gemini").
+  const lower = filePath.toLowerCase();
+
+  if (lower.includes('crush') && (lower.endsWith('crush.json') || lower.endsWith('crush.log'))) {
+    return 'crush';
+  }
+  if (lower.includes('.specstory/')) return 'specstory';
+  if (lower.includes('.aider.')) return 'aider';
+  if (lower.includes('.qwen/') || lower.includes('/.qwen')) return 'qwen';
+  if (lower.includes('wire.jsonl') && lower.includes('.kimi')) return 'kimi';
+  if (
+    lower.includes('.openclaw') ||
+    lower.includes('.clawdbot') ||
+    lower.includes('.moltbot') ||
+    lower.includes('.moldbot')
+  ) {
+    return 'openclaw';
+  }
+  if (lower.includes('/.copilot/otel/')) return 'copilot';
+  if (lower.includes('/.local/share/amp/')) return 'amp';
+  if (lower.includes('.factory/') && lower.endsWith('.settings.json')) return 'droid';
+  if (lower.includes('chat-messages.json')) return 'codebuff';
+  if (lower.includes('.pi/agent')) return 'pi-agent';
+  if (lower.includes('opencode')) return 'opencode';
+  if (lower.includes('goose') && lower.endsWith('sessions.db')) return 'goose';
+  if (lower.includes('hermes') && lower.endsWith('.db')) return 'hermes';
+  if (lower.includes('/kilo/') && lower.endsWith('.db')) return 'kilo';
+  if (lower.includes('.cursor') && lower.endsWith('state.vscdb')) return 'cursor';
+
+  // Match against registry detect-dir hints (e.g. ".claude", ".gemini").
   for (const def of listProviders()) {
     for (const dir of def.detectDirs) {
-      const leaf = dir.replace(/^~\//, '').replace(/^~/, '');
+      const leaf = dir.replace(/^~\//, '').replace(/^~/, '').replace(/^\$[A-Z0-9_]+\//, '');
       if (leaf && filePath.includes(leaf)) return def.id;
     }
   }
@@ -211,6 +239,8 @@ export function detectProvider(filePath: string): Provider {
     const sample = fs.readFileSync(filePath, 'utf-8').slice(0, 1024);
     if (sample.includes('"session_id"') && sample.includes('"uuid"')) return 'claude';
     if (sample.includes('"chatId"') || sample.includes('"usageMetadata"')) return 'gemini';
+    if (sample.includes('"StatusUpdate"') && sample.includes('token_usage')) return 'kimi';
+    if (sample.includes('gen_ai.usage')) return 'copilot';
   } catch {
     // Ignore unreadable files.
   }

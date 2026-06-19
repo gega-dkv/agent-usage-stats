@@ -1,0 +1,5 @@
+{
+  "sessionId": "droid-2",
+  "sessionName": "No tokens",
+  "messages": [{ "role": "user", "content": "hello" }]
+}

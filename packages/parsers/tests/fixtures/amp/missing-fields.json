@@ -1,0 +1,5 @@
+{
+  "id": "thread-2",
+  "title": "No usage",
+  "messages": [{ "role": "user", "content": "hello" }]
+}

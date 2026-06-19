@@ -1,0 +1,16 @@
+[
+  {
+    "role": "user",
+    "content": "Add tests for billing",
+    "metadata": {
+      "usage": { "inputTokens": 700, "outputTokens": 0, "cacheReadTokens": 50 }
+    }
+  },
+  {
+    "role": "assistant",
+    "content": "Added billing tests.",
+    "metadata": {
+      "codebuff": { "usage": { "outputTokens": 260, "cacheCreationTokens": 10, "credits": 1.2 } }
+    }
+  }
+]

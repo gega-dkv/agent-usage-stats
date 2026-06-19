@@ -2,34 +2,84 @@
 
 import { useEffect, useState } from 'react';
 import { ScanButton } from '@/components/scan-button';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+
+type ProviderSetting = {
+  id: string;
+  label: string;
+  defaultPaths: string[];
+  enabled: boolean;
+  paths: string[];
+  supportLevel: string;
+};
+
+type SettingsData = {
+  privacyMode: string;
+  currency: string;
+  storeRawRecords: boolean;
+  estimatePromptOnlySources: boolean;
+  resimulateRecordedCosts: boolean;
+  providers: ProviderSetting[];
+};
 
 export default function SettingsPage() {
-  const [privacyMode, setPrivacyMode] = useState('disabled');
+  const [settings, setSettings] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  useEffect(() => {
-    fetch('/api/privacy')
+  const load = () => {
+    fetch('/api/settings')
       .then((r) => r.json())
       .then((d) => {
-        setPrivacyMode(d.privacyMode || 'disabled');
+        setSettings(d);
         setLoading(false);
       })
       .catch(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
   }, []);
 
-  const handleSave = async () => {
+  const save = async (extra?: Record<string, unknown>) => {
+    if (!settings) return;
     setSaving(true);
     try {
-      await fetch('/api/privacy', {
+      const providers: Record<string, { enabled: boolean; paths: string[] }> = {};
+      for (const p of settings.providers) {
+        providers[p.id] = { enabled: p.enabled, paths: p.paths };
+      }
+      const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ privacyMode }),
+        body: JSON.stringify({
+          privacyMode: settings.privacyMode,
+          currency: settings.currency,
+          storeRawRecords: settings.storeRawRecords,
+          estimatePromptOnlySources: settings.estimatePromptOnlySources,
+          resimulateRecordedCosts: settings.resimulateRecordedCosts,
+          providers,
+          ...extra,
+        }),
       });
-      setMessage('Privacy settings saved');
-      setTimeout(() => setMessage(''), 3000);
-    } catch (e) {
+      const data = await res.json();
+      setMessage(data.scanResult ? 'Rescan complete' : 'Settings saved');
+      setTimeout(() => setMessage(''), 4000);
+      load();
+    } catch {
       setMessage('Error saving settings');
     } finally {
       setSaving(false);
@@ -37,26 +87,22 @@ export default function SettingsPage() {
   };
 
   const handlePurge = async () => {
-    if (!confirm('Permanently delete all stored prompt/response content? This cannot be undone.'))
-      return;
-    try {
-      await fetch('/api/privacy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ purgeContent: true }),
-      });
-      setMessage('Content purged');
-      setTimeout(() => setMessage(''), 3000);
-    } catch (e) {
-      setMessage('Error purging content');
-    }
+    if (!confirm('Permanently delete all stored prompt/response content?')) return;
+    await fetch('/api/privacy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ purgeContent: true }),
+    });
+    setMessage('Content purged');
   };
 
-  if (loading) {
-    return <div className="animate-pulse space-y-4">
-      <div className="h-8 w-48 rounded bg-muted" />
-      <div className="h-64 rounded-2xl bg-muted" />
-    </div>;
+  if (loading || !settings) {
+    return (
+      <div className="animate-pulse space-y-4">
+        <div className="h-8 w-48 rounded bg-muted" />
+        <div className="h-64 rounded-2xl bg-muted" />
+      </div>
+    );
   }
 
   return (
@@ -76,124 +122,164 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Privacy */}
-      <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-        <h2 className="text-lg font-semibold">Privacy</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Control what session content is stored locally
-        </p>
-
-        <div className="mt-6 space-y-3">
-          {[
-            {
-              value: 'disabled',
-              label: 'Disabled',
-              desc: 'No prompt or response content. Only token counts and metadata.',
-              recommended: true,
-            },
-            {
-              value: 'preview',
-              label: 'Preview',
-              desc: 'Store short redacted previews only.',
-            },
-            {
-              value: 'full',
-              label: 'Full',
-              desc: 'Store full prompt and response content.',
-            },
-            {
-              value: 'raw',
-              label: 'Raw',
-              desc: 'Store full raw session records (debugging).',
-            },
-          ].map((opt) => {
-            const selected = privacyMode === opt.value;
-            return (
-              <label
-                key={opt.value}
-                className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition ${
-                  selected
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border bg-background hover:bg-accent/50'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="privacy"
-                  value={opt.value}
-                  checked={selected}
-                  onChange={(e) => setPrivacyMode(e.target.value)}
-                  className="mt-1 h-4 w-4 accent-primary"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{opt.label}</span>
-                    {opt.recommended && (
-                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
-                        Recommended
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{opt.desc}</p>
-                </div>
-              </label>
-            );
-          })}
-        </div>
-
-        <div className="mt-6 flex items-center gap-3">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-50"
+      <Card>
+        <CardHeader>
+          <CardTitle>Privacy</CardTitle>
+          <CardDescription>Control how much prompt content is stored locally</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs
+            value={settings.privacyMode}
+            onValueChange={(mode) => setSettings({ ...settings, privacyMode: mode })}
           >
-            {saving ? 'Saving…' : 'Save privacy mode'}
-          </button>
-          <button
-            onClick={handlePurge}
-            className="rounded-lg border border-destructive px-4 py-2 text-sm font-medium text-destructive transition hover:bg-destructive hover:text-destructive-foreground"
-          >
-            Purge stored content
-          </button>
-        </div>
-      </div>
+            <TabsList>
+              {['disabled', 'preview', 'full', 'raw'].map((mode) => (
+                <TabsTrigger key={mode} value={mode}>
+                  {mode}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {['disabled', 'preview', 'full', 'raw'].map((mode) => (
+              <TabsContent key={mode} value={mode} className="text-sm text-muted-foreground">
+                {mode === 'disabled' && 'No prompt content stored.'}
+                {mode === 'preview' && 'Store truncated previews only.'}
+                {mode === 'full' && 'Store full prompt and response text.'}
+                {mode === 'raw' && 'Store raw provider records for debugging.'}
+              </TabsContent>
+            ))}
+          </Tabs>
+        </CardContent>
+      </Card>
 
-      {/* Database */}
-      <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-        <h2 className="text-lg font-semibold">Database</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Local SQLite database location
-        </p>
-        <div className="mt-4 flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3">
-          <code className="font-mono text-xs">~/.config/agent-usage-stats/stats.db</code>
-        </div>
-      </div>
-
-      {/* CLI commands */}
-      <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
-        <h2 className="text-lg font-semibold">CLI commands</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Manage from the command line
-        </p>
-        <div className="mt-4 space-y-2">
-          {[
-            { cmd: 'pnpm cli sync', desc: 'Detect installed agents and sync sessions' },
-            { cmd: 'pnpm cli sync --agent codex', desc: 'Sync only Codex sessions' },
-            { cmd: 'pnpm cli stats', desc: 'View usage statistics' },
-            { cmd: 'pnpm cli doctor', desc: 'Run health check' },
-            { cmd: 'pnpm cli privacy set full', desc: 'Enable full prompt storage' },
-            { cmd: 'pnpm cli privacy purge-content', desc: 'Purge stored content' },
-          ].map((item) => (
-            <div
-              key={item.cmd}
-              className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2"
+      <Card>
+        <CardHeader>
+          <CardTitle>Data & display</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="flex items-center gap-2">
+            <Switch
+              id="store-raw"
+              checked={settings.storeRawRecords}
+              onCheckedChange={(checked) =>
+                setSettings({ ...settings, storeRawRecords: checked })
+              }
+            />
+            <Label htmlFor="store-raw">Store raw records (debugging)</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="estimate-prompt"
+              checked={settings.estimatePromptOnlySources}
+              onCheckedChange={(checked) =>
+                setSettings({ ...settings, estimatePromptOnlySources: checked })
+              }
+            />
+            <Label htmlFor="estimate-prompt">Estimate tokens for prompt-only sources</Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Switch
+              id="resimulate"
+              checked={settings.resimulateRecordedCosts}
+              onCheckedChange={(checked) =>
+                setSettings({ ...settings, resimulateRecordedCosts: checked })
+              }
+            />
+            <Label htmlFor="resimulate">Re-simulate recorded costs</Label>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label>Currency</Label>
+            <Select
+              value={settings.currency}
+              onValueChange={(currency) => setSettings({ ...settings, currency })}
             >
-              <code className="font-mono text-xs">{item.cmd}</code>
-              <span className="text-xs text-muted-foreground">{item.desc}</span>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="USD">USD</SelectItem>
+                <SelectItem value="EUR">EUR</SelectItem>
+                <SelectItem value="GBP">GBP</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Providers</CardTitle>
+          <CardDescription>
+            Enable or disable scanning per provider. Custom paths override defaults.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {settings.providers.map((p, idx) => (
+            <div key={p.id} className="rounded-lg border border-border p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id={`provider-${p.id}`}
+                    checked={p.enabled}
+                    onCheckedChange={(checked) => {
+                      const providers = [...settings.providers];
+                      providers[idx] = { ...p, enabled: checked };
+                      setSettings({ ...settings, providers });
+                    }}
+                  />
+                  <Label htmlFor={`provider-${p.id}`} className="font-medium">
+                    {p.label}
+                  </Label>
+                  <span className="text-xs text-muted-foreground">({p.supportLevel})</span>
+                </div>
+              </div>
+              <p
+                className="mt-1 truncate text-[11px] text-muted-foreground"
+                title={p.defaultPaths.join(', ')}
+              >
+                Default: {p.defaultPaths[0] || '—'}
+              </p>
+              <Input
+                type="text"
+                placeholder="Custom paths (comma-separated)"
+                value={p.paths.join(', ')}
+                onChange={(e) => {
+                  const providers = [...settings.providers];
+                  providers[idx] = {
+                    ...p,
+                    paths: e.target.value
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  };
+                  setSettings({ ...settings, providers });
+                }}
+                className="mt-2 text-xs"
+              />
             </div>
           ))}
-        </div>
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-wrap gap-3">
+        <Button onClick={() => save()} disabled={saving}>
+          {saving ? 'Saving…' : 'Save settings'}
+        </Button>
+        <Button variant="outline" onClick={() => save({ rescan: true })} disabled={saving}>
+          Force rescan
+        </Button>
+        <Button variant="outline" onClick={() => save({ rebuildIndexes: true })} disabled={saving}>
+          Rebuild rollups
+        </Button>
+        <Button variant="destructive" onClick={handlePurge}>
+          Purge content
+        </Button>
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        The web dashboard binds to localhost (127.0.0.1) by default. Run via{' '}
+        <code className="rounded bg-muted px-1">pnpm cli dashboard</code> or{' '}
+        <code className="rounded bg-muted px-1">pnpm dev</code> — data never leaves your machine.
+      </p>
     </div>
   );
 }

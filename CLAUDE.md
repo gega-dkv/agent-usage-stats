@@ -44,7 +44,7 @@ pnpm monorepo. Apps in `apps/` (`cli`, `web`), libraries in `packages/`. Workspa
 
 ### Database (`packages/db`)
 
-SQLite via `better-sqlite3` + Drizzle. **The schema is defined in two places that must be kept in sync manually — there are no migrations.** `schema.ts` is the Drizzle table definitions used for typed queries, while `connection.ts` (`initializeDatabase`) holds the raw `CREATE TABLE IF NOT EXISTS` DDL that actually creates the tables. When changing the schema, edit both. Some writes in `scan.ts` use raw `sqlite.prepare(...)` rather than Drizzle.
+SQLite via `better-sqlite3` + Drizzle. **The schema is defined in two places that must be kept in sync manually.** `schema.ts` is the Drizzle table definitions used for typed queries, while `connection.ts` (`initializeDatabase`) holds the raw `CREATE TABLE IF NOT EXISTS` DDL that actually creates the tables. Incremental upgrades for existing `stats.db` files run via `migrations.ts` (`schema_version` in `settings`). When changing the schema, edit `schema.ts`, `connection.ts`, and add a migration step in `migrations.ts`. Some writes in `scan.ts` use raw `sqlite.prepare(...)` rather than Drizzle.
 
 DB path resolution order: `config.dbPath` → `AGENT_USAGE_DB_PATH` env → `~/.config/agent-usage-stats/stats.db` (`XDG_CONFIG_HOME` aware). Query helpers live in `queries.ts` and are consumed by both the CLI and the web API routes.
 

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { Nav } from '@/components/nav';
@@ -13,7 +14,7 @@ export const metadata: Metadata = {
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
@@ -27,7 +28,7 @@ export default function RootLayout({
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
               <p className="text-center text-xs text-muted-foreground">
                 All data stays on your machine · No telemetry ·{' '}
-                <a href="https://github.com" className="hover:underline">
+                <a href="https://github.com/gega-dkv/agent-usage-stats" className="hover:underline">
                   GitHub
                 </a>
               </p>

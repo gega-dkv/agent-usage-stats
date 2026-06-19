@@ -1,0 +1,3 @@
+{"uuid":"msg-c1","type":"message","role":"human","content":"Valid first line","usage":{"input_tokens":100,"output_tokens":0},"session_id":"session-corrupt"}
+{ invalid json on this line
+{"uuid":"msg-c2","type":"message","role":"assistant","content":[{"type":"text","text":"Valid after corrupt line"}],"usage":{"input_tokens":0,"output_tokens":75},"session_id":"session-corrupt"}

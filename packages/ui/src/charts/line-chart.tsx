@@ -1,3 +1,5 @@
+import { DEFAULT_LINE_COLOR, shortNumber } from './chart-utils.js';
+
 type LineChartData = {
   label: string;
   value: number;
@@ -5,118 +7,141 @@ type LineChartData = {
 
 type UsageLineChartProps = {
   data: LineChartData[];
-  width?: number;
   height?: number;
   color?: string;
-  title?: string;
+  gradient?: boolean;
   formatValue?: (value: number) => string;
 };
 
 export function UsageLineChart({
   data,
-  width = 400,
   height = 200,
-  color = 'hsl(222.2, 47.4%, 11.2%)',
-  title,
+  color = DEFAULT_LINE_COLOR,
+  gradient = true,
   formatValue,
 }: UsageLineChartProps) {
   if (data.length === 0) {
     return (
       <div
-        className="flex items-center justify-center text-muted-foreground"
-        style={{ width, height }}
+        className="flex items-center justify-center text-sm text-muted-foreground"
+        style={{ height }}
+        role="img"
+        aria-label="No data available"
       >
         No data available
       </div>
     );
   }
 
-  const maxValue = Math.max(...data.map((d) => d.value));
-  const padding = { top: 20, right: 20, bottom: 40, left: 60 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
+  const fmt = formatValue || shortNumber;
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const w = 600;
+  const h = height;
+  const padL = 50;
+  const padR = 20;
+  const padT = 20;
+  const padB = 30;
+  const chartW = w - padL - padR;
+  const chartH = h - padT - padB;
 
   const points = data.map((d, i) => ({
-    x: padding.left + (i / (data.length - 1)) * chartWidth,
-    y: padding.top + chartHeight - (d.value / maxValue) * chartHeight,
+    x: padL + (data.length === 1 ? chartW / 2 : (i / (data.length - 1)) * chartW),
+    y: padT + chartH - (d.value / max) * chartH,
+    ...d,
   }));
 
-  const pathD = points
-    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`)
-    .join(' ');
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  const areaPath = `${linePath} L ${points[points.length - 1].x} ${padT + chartH} L ${points[0].x} ${padT + chartH} Z`;
 
-  const areaD = `${pathD} L ${points[points.length - 1].x} ${padding.top + chartHeight} L ${points[0].x} ${padding.top + chartHeight} Z`;
+  const gridLines = 4;
+  const yLabels: { y: number; value: number }[] = [];
+  for (let i = 0; i <= gridLines; i++) {
+    yLabels.push({
+      y: padT + chartH - (i / gridLines) * chartH,
+      value: (i / gridLines) * max,
+    });
+  }
 
-  const format = formatValue || ((v: number) => v.toLocaleString());
+  const xStep = Math.max(1, Math.ceil(data.length / 6));
 
   return (
-    <div className="relative">
-      {title && (
-        <h3 className="text-sm font-medium mb-2">{title}</h3>
-      )}
-      <svg width={width} height={height} className="w-full h-auto">
-        {/* Grid lines */}
-        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
-          <g key={ratio}>
-            <line
-              x1={padding.left}
-              y1={padding.top + chartHeight * (1 - ratio)}
-              x2={padding.left + chartWidth}
-              y2={padding.top + chartHeight * (1 - ratio)}
-              stroke="currentColor"
-              strokeOpacity={0.1}
-            />
-            <text
-              x={padding.left - 8}
-              y={padding.top + chartHeight * (1 - ratio) + 4}
-              textAnchor="end"
-              className="fill-current text-xs"
-              style={{ color: 'hsl(var(--muted-foreground))' }}
-            >
-              {format(maxValue * ratio)}
-            </text>
-          </g>
-        ))}
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }} role="img" aria-label="Usage line chart">
+      <defs>
+        <linearGradient id="usageLineGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.4" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
 
-        {/* X-axis labels */}
-        {data.filter((_, i) => i % Math.ceil(data.length / 6) === 0 || i === data.length - 1).map((d, i) => (
+      {yLabels.map((l, i) => (
+        <g key={i}>
+          <line
+            x1={padL}
+            y1={l.y}
+            x2={w - padR}
+            y2={l.y}
+            stroke="currentColor"
+            strokeOpacity="0.08"
+            strokeDasharray="2,3"
+          />
+          <text
+            x={padL - 8}
+            y={l.y + 4}
+            textAnchor="end"
+            className="fill-muted-foreground"
+            fontSize="10"
+          >
+            {fmt(l.value)}
+          </text>
+        </g>
+      ))}
+
+      {points.map((p, i) => {
+        if (i % xStep !== 0 && i !== data.length - 1) return null;
+        return (
           <text
             key={i}
-            x={padding.left + (data.indexOf(d) / (data.length - 1)) * chartWidth}
-            y={height - 10}
+            x={p.x}
+            y={h - 8}
             textAnchor="middle"
-            className="fill-current text-xs"
-            style={{ color: 'hsl(var(--muted-foreground))' }}
+            className="fill-muted-foreground"
+            fontSize="10"
           >
-            {d.label}
+            {p.label}
           </text>
-        ))}
+        );
+      })}
 
-        {/* Area fill */}
-        <path d={areaD} fill={color} fillOpacity={0.1} />
+      {gradient && <path d={areaPath} fill="url(#usageLineGrad)" />}
+      <path
+        d={linePath}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
 
-        {/* Line */}
-        <path
-          d={pathD}
-          fill="none"
-          stroke={color}
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        {/* Data points */}
-        {points.map((p, i) => (
-          <circle
-            key={i}
-            cx={p.x}
-            cy={p.y}
-            r={3}
-            fill={color}
-            className="hover:r-4 transition-all"
-          />
-        ))}
-      </svg>
-    </div>
+      {points.map((p, i) => (
+        <g key={i} className="group">
+          <circle cx={p.x} cy={p.y} r="3" fill={color} className="transition-all" tabIndex={0} />
+          <circle cx={p.x} cy={p.y} r="6" fill="transparent" className="cursor-pointer" />
+          <g className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            <rect
+              x={p.x - 30}
+              y={p.y - 30}
+              width="60"
+              height="20"
+              rx="4"
+              fill="hsl(var(--popover))"
+              stroke="hsl(var(--border))"
+            />
+            <text x={p.x} y={p.y - 16} textAnchor="middle" fontSize="10" className="fill-foreground">
+              {fmt(p.value)}
+            </text>
+          </g>
+        </g>
+      ))}
+    </svg>
   );
 }

@@ -1,0 +1,14 @@
+{
+  "sessionId": "droid-1",
+  "sessionName": "Auth refactor",
+  "projectName": "backend",
+  "model": "claude-sonnet",
+  "provider": "anthropic",
+  "usage": {
+    "inputTokens": 1100,
+    "outputTokens": 480,
+    "cacheCreationTokens": 20,
+    "cacheReadTokens": 150,
+    "thinkingTokens": 90
+  }
+}

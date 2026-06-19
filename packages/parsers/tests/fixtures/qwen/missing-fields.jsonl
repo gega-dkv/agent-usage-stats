@@ -1,0 +1,2 @@
+{"role":"user","parts":[{"text":"Hello without usage metadata"}]}
+{"role":"model","parts":[{"text":"Response without usage metadata"}]}

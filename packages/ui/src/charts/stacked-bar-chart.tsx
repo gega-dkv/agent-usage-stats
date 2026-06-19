@@ -1,3 +1,5 @@
+import { CHART_COLORS, shortNumber } from './chart-utils.js';
+
 type StackItem = {
   label: string;
   value: number;
@@ -11,7 +13,6 @@ type CostStackedBarChartData = {
 
 type CostStackedBarChartProps = {
   data: CostStackedBarChartData[];
-  width?: number;
   height?: number;
   title?: string;
   formatValue?: (value: number) => string;
@@ -19,7 +20,6 @@ type CostStackedBarChartProps = {
 
 export function CostStackedBarChart({
   data,
-  width = 400,
   height = 200,
   title,
   formatValue,
@@ -27,71 +27,68 @@ export function CostStackedBarChart({
   if (data.length === 0) {
     return (
       <div
-        className="flex items-center justify-center text-muted-foreground"
-        style={{ width, height }}
+        className="flex items-center justify-center text-sm text-muted-foreground"
+        style={{ height }}
+        role="img"
+        aria-label="No data available"
       >
         No data available
       </div>
     );
   }
 
-  const allValues = data.flatMap((d) => d.stacks.map((s) => s.value));
-  const maxValue = Math.max(...allValues);
-  const padding = { top: 20, right: 20, bottom: 40, left: 60 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
-
-  const format = formatValue || ((v: number) => v.toLocaleString());
-
-  const defaultColors = [
-    'hsl(222.2, 47.4%, 11.2%)',
-    'hsl(210, 40%, 50%)',
-    'hsl(150, 50%, 40%)',
-    'hsl(30, 80%, 50%)',
-    'hsl(280, 60%, 50%)',
-  ];
-
-  const barWidth = Math.min(40, (chartWidth - data.length * 8) / data.length);
+  const fmt = formatValue || shortNumber;
+  const maxValue = Math.max(
+    ...data.map((d) => d.stacks.reduce((sum, s) => sum + s.value, 0)),
+    1,
+  );
+  const w = 600;
+  const h = height;
+  const padL = 50;
+  const padR = 20;
+  const padT = 20;
+  const padB = 30;
+  const chartW = w - padL - padR;
+  const chartH = h - padT - padB;
+  const barWidth = Math.min(40, (chartW - data.length * 8) / data.length);
 
   return (
     <div className="relative">
-      {title && <h3 className="text-sm font-medium mb-2">{title}</h3>}
-      <svg width={width} height={height} className="w-full h-auto">
-        {/* Grid lines */}
+      {title && <h3 className="mb-2 text-sm font-medium">{title}</h3>}
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }} role="img" aria-label="Cost stacked bar chart">
         {[0, 0.25, 0.5, 0.75, 1].map((ratio) => (
           <g key={ratio}>
             <line
-              x1={padding.left}
-              y1={padding.top + chartHeight * (1 - ratio)}
-              x2={padding.left + chartWidth}
-              y2={padding.top + chartHeight * (1 - ratio)}
+              x1={padL}
+              y1={padT + chartH * (1 - ratio)}
+              x2={padL + chartW}
+              y2={padT + chartH * (1 - ratio)}
               stroke="currentColor"
-              strokeOpacity={0.1}
+              strokeOpacity="0.1"
             />
             <text
-              x={padding.left - 8}
-              y={padding.top + chartHeight * (1 - ratio) + 4}
+              x={padL - 8}
+              y={padT + chartH * (1 - ratio) + 4}
               textAnchor="end"
-              className="fill-current text-xs"
-              style={{ color: 'hsl(var(--muted-foreground))' }}
+              className="fill-muted-foreground"
+              fontSize="10"
             >
-              {format(maxValue * ratio)}
+              {fmt(maxValue * ratio)}
             </text>
           </g>
         ))}
 
-        {/* Stacked bars */}
         {data.map((d, i) => {
-          const x = padding.left + i * (barWidth + 8);
-          let currentY = padding.top + chartHeight;
+          const x = padL + i * (barWidth + 8);
+          let currentY = padT + chartH;
+          const total = d.stacks.reduce((sum, s) => sum + s.value, 0);
 
           return (
-            <g key={i}>
+            <g key={i} className="group">
               {d.stacks.map((stack, j) => {
-                const stackHeight = (stack.value / maxValue) * chartHeight;
+                const stackHeight = (stack.value / maxValue) * chartH;
                 currentY -= stackHeight;
-                const color = stack.color || defaultColors[j % defaultColors.length];
-
+                const color = stack.color || CHART_COLORS[j % CHART_COLORS.length];
                 return (
                   <rect
                     key={j}
@@ -101,18 +98,21 @@ export function CostStackedBarChart({
                     height={stackHeight}
                     fill={color}
                     rx={j === d.stacks.length - 1 ? 4 : 0}
+                    tabIndex={0}
+                    aria-label={`${d.label} ${stack.label}: ${fmt(stack.value)}`}
                   />
                 );
               })}
               <text
                 x={x + barWidth / 2}
-                y={height - 10}
+                y={h - 8}
                 textAnchor="middle"
-                className="fill-current text-xs"
-                style={{ color: 'hsl(var(--muted-foreground))' }}
+                className="fill-muted-foreground"
+                fontSize="10"
               >
                 {d.label}
               </text>
+              <title>{`${d.label}: ${fmt(total)}`}</title>
             </g>
           );
         })}

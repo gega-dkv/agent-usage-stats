@@ -1,7 +1,15 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { formatNumber, formatDateTime, providerLabel, providerBadge } from '@/lib/format';
+import {
+  formatNumber,
+  formatCurrency,
+  formatDateTime,
+  providerLabel,
+  providerBadge,
+} from '@/lib/format';
+import { listProviderIds, getProviderDefinition } from '@agent-usage/shared';
 
 type Prompt = {
   id: string;
@@ -10,18 +18,36 @@ type Prompt = {
   role: string;
   model: string | null;
   contentPreview: string;
+  contentHidden: boolean;
   inputTokens: number | null;
   outputTokens: number | null;
+  simulatedCost: number | null;
   provider: string;
   projectName: string | null;
+  supportLevel?: string;
+  hasReliableTokens?: boolean;
+  noReliableUsageMessage?: string;
 };
+
+const PAGE_SIZE = 50;
 
 export default function PromptsPage() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [providerFilter, setProviderFilter] = useState('all');
+  const [modelFilter, setModelFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [viewMode, setViewMode] = useState<'full' | 'preview' | 'hidden'>('preview');
+  const [offset, setOffset] = useState(0);
   const [privacyMode, setPrivacyMode] = useState<string>('disabled');
+
+  const providerOptions = listProviderIds().map((id) => ({
+    id,
+    label: getProviderDefinition(id)?.label ?? id,
+  }));
 
   useEffect(() => {
     fetch('/api/privacy')
@@ -31,14 +57,19 @@ export default function PromptsPage() {
   }, []);
 
   const fetchPrompts = () => {
-    if (!search) {
-      setPrompts([]);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
-    const params = new URLSearchParams({ q: search, limit: '100' });
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(offset),
+      viewMode,
+    });
+    if (search) params.set('q', search);
     if (providerFilter !== 'all') params.set('provider', providerFilter);
+    if (modelFilter) params.set('model', modelFilter);
+    if (projectFilter) params.set('project', projectFilter);
+    if (dateFrom) params.set('from', new Date(dateFrom).toISOString());
+    if (dateTo) params.set('to', new Date(`${dateTo}T23:59:59`).toISOString());
+
     fetch(`/api/prompts?${params}`)
       .then((r) => r.json())
       .then((d) => {
@@ -51,137 +82,175 @@ export default function PromptsPage() {
   useEffect(() => {
     const t = setTimeout(fetchPrompts, 300);
     return () => clearTimeout(t);
-  }, [search, providerFilter]);
+  }, [search, providerFilter, modelFilter, projectFilter, dateFrom, dateTo, viewMode, offset]);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Prompts</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Search across all user prompts from your scanned sessions
+          Browse and search user prompts from scanned sessions
         </p>
       </div>
 
-      {/* Privacy notice */}
       {privacyMode === 'disabled' && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/20">
-          <div className="flex items-start gap-3">
-            <svg className="h-5 w-5 flex-shrink-0 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-            <div>
-              <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-                Privacy mode: disabled
-              </h4>
-              <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-                Prompt content is not stored by default. Enable preview or full mode in{' '}
-                <a href="/settings" className="underline">
-                  Settings
-                </a>{' '}
-                to view full prompts.
-              </p>
-            </div>
-          </div>
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            Privacy mode is disabled — prompt content is not stored by default. Enable preview or full
+            mode in <Link href="/settings" className="underline">Settings</Link>.
+          </p>
         </div>
       )}
 
-      {/* Search bar */}
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm">
-        <div className="flex flex-1 items-center gap-2">
-          <svg className="h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="8" />
-            <path d="M21 21l-4.35-4.35" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search prompt text (e.g. 'refactor auth')…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 rounded-md border-0 bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-0"
-            autoFocus
-          />
-        </div>
-        <div className="h-6 w-px bg-border" />
+        <input
+          type="text"
+          placeholder="Optional search…"
+          value={search}
+          onChange={(e) => {
+            setOffset(0);
+            setSearch(e.target.value);
+          }}
+          className="min-w-[12rem] flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+        />
         <select
           value={providerFilter}
-          onChange={(e) => setProviderFilter(e.target.value)}
-          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          onChange={(e) => {
+            setOffset(0);
+            setProviderFilter(e.target.value);
+          }}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
         >
           <option value="all">All providers</option>
-          <option value="claude">Claude</option>
-          <option value="codex">Codex</option>
-          <option value="gemini">Gemini</option>
+          {providerOptions.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          placeholder="Model filter"
+          value={modelFilter}
+          onChange={(e) => {
+            setOffset(0);
+            setModelFilter(e.target.value);
+          }}
+          className="w-36 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+        />
+        <input
+          type="text"
+          placeholder="Project filter"
+          value={projectFilter}
+          onChange={(e) => {
+            setOffset(0);
+            setProjectFilter(e.target.value);
+          }}
+          className="w-36 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+        />
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => {
+            setOffset(0);
+            setDateFrom(e.target.value);
+          }}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+        />
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => {
+            setOffset(0);
+            setDateTo(e.target.value);
+          }}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+        />
+        <select
+          value={viewMode}
+          onChange={(e) => setViewMode(e.target.value as typeof viewMode)}
+          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+        >
+          <option value="full">Full content</option>
+          <option value="preview">Preview</option>
+          <option value="hidden">Hidden (stats only)</option>
         </select>
       </div>
 
-      {/* Results */}
       {loading ? (
         <div className="space-y-2">
           {[...Array(3)].map((_, i) => (
             <div key={i} className="h-20 animate-pulse rounded-xl bg-muted" />
           ))}
         </div>
-      ) : !search ? (
-        <div className="rounded-2xl border-2 border-dashed border-border bg-card/50 p-12 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="8" />
-              <path d="M21 21l-4.35-4.35" />
-            </svg>
-          </div>
-          <h3 className="mt-4 font-semibold">Search your prompts</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Type to search across all user prompts
-          </p>
-        </div>
       ) : prompts.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card p-12 text-center">
-          <p className="text-sm text-muted-foreground">
-            No prompts found for &ldquo;{search}&rdquo;
-          </p>
+          <p className="text-sm text-muted-foreground">No prompts found</p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {prompts.map((p) => (
-            <div
-              key={p.id}
-              className="rounded-xl border border-border bg-card p-4 shadow-sm transition hover:shadow-md"
+        <>
+          <div className="space-y-2">
+            {prompts.map((p) => (
+              <div
+                key={p.id}
+                className="rounded-xl border border-border bg-card p-4 shadow-sm transition hover:shadow-md"
+              >
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span
+                    className={`inline-flex items-center rounded-full border px-2 py-0.5 font-medium ${providerBadge(p.provider)}`}
+                  >
+                    {providerLabel(p.provider)}
+                  </span>
+                  {p.model && <span className="font-mono text-muted-foreground">{p.model}</span>}
+                  <Link
+                    href={`/sessions/${encodeURIComponent(p.sessionId)}`}
+                    className="text-primary hover:underline"
+                  >
+                    View session
+                  </Link>
+                  <span className="ml-auto text-muted-foreground">{formatDateTime(p.timestamp)}</span>
+                </div>
+                <p className="mt-2 line-clamp-3 text-sm">{p.contentPreview}</p>
+                {p.contentHidden && (
+                  <p className="mt-1 text-xs text-muted-foreground italic">
+                    Content hidden — stats only
+                    {p.supportLevel === 'prompt-history-only' ? ' (prompt-history-only provider)' : ''}
+                  </p>
+                )}
+                {!p.hasReliableTokens && p.noReliableUsageMessage && (
+                  <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                    {p.noReliableUsageMessage}
+                  </p>
+                )}
+                <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                  {p.inputTokens != null && <span>In: {formatNumber(p.inputTokens)}</span>}
+                  {p.outputTokens != null && <span>Out: {formatNumber(p.outputTokens)}</span>}
+                  {p.simulatedCost != null && p.simulatedCost > 0 && (
+                    <span>Est. cost: {formatCurrency(p.simulatedCost)}</span>
+                  )}
+                  {p.projectName && <span className="ml-auto truncate">{p.projectName}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between">
+            <button
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+              className="rounded-md border border-input px-3 py-1.5 text-sm disabled:opacity-50"
             >
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span
-                  className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${providerBadge(
-                    p.provider,
-                  )}`}
-                >
-                  {providerLabel(p.provider)}
-                </span>
-                <span className="text-muted-foreground">{p.role}</span>
-                {p.model && (
-                  <span className="font-mono text-muted-foreground">{p.model}</span>
-                )}
-                <span className="ml-auto text-muted-foreground">
-                  {formatDateTime(p.timestamp)}
-                </span>
-              </div>
-              <p className="mt-2 line-clamp-3 text-sm">{p.contentPreview}</p>
-              <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
-                {p.inputTokens != null && (
-                  <span>
-                    <span className="font-medium">In:</span> {formatNumber(p.inputTokens)}
-                  </span>
-                )}
-                {p.outputTokens != null && (
-                  <span>
-                    <span className="font-medium">Out:</span> {formatNumber(p.outputTokens)}
-                  </span>
-                )}
-                {p.projectName && (
-                  <span className="ml-auto truncate">📁 {p.projectName}</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+              Previous
+            </button>
+            <span className="text-xs text-muted-foreground">Offset {offset}</span>
+            <button
+              disabled={prompts.length < PAGE_SIZE}
+              onClick={() => setOffset(offset + PAGE_SIZE)}
+              className="rounded-md border border-input px-3 py-1.5 text-sm disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { initializeDatabase } from '@agent-usage/db';
+import { initializeDatabase, getSchemaVersion } from '@agent-usage/db';
 import {
   getDailyUsage,
+  getWeeklyUsage,
   getMonthlyUsage,
   getYearlyUsage,
   getStatsSummary,
@@ -14,8 +15,11 @@ import {
   setSetting,
   purgeContent,
   refreshUsageRollups,
+  getScanRuns,
+  getParserWarnings,
+  getSessions,
 } from '@agent-usage/db';
-import { scanSessions, loadConfig } from '@agent-usage/core';
+import { scanSessions, loadConfig, validateConfig } from '@agent-usage/core';
 import {
   detectAgentInstallations,
   getProviderDefaultPaths,
@@ -32,10 +36,62 @@ import {
 } from '@agent-usage/shared';
 import type { Provider } from '@agent-usage/shared';
 import fs from 'fs';
-import path from 'path';
 import readline from 'readline/promises';
+import path from 'path';
+import { resolveWebAppTarget } from './web-app.js';
 
 const program = new Command();
+
+type StatsGranularity = 'day' | 'week' | 'month' | 'year';
+
+function resolveStatsGranularity(options: {
+  day?: boolean;
+  week?: boolean;
+  month?: boolean;
+  year?: boolean;
+  granularity?: string;
+}): StatsGranularity | null {
+  if (options.granularity) {
+    const g = options.granularity.toLowerCase();
+    if (g === 'day' || g === 'week' || g === 'month' || g === 'year') return g;
+    throw new Error(`Invalid granularity "${options.granularity}". Use: day, week, month, year.`);
+  }
+  if (options.day) return 'day';
+  if (options.week) return 'week';
+  if (options.month) return 'month';
+  if (options.year) return 'year';
+  return null;
+}
+
+function getUsageByGranularity(
+  db: ReturnType<typeof initializeDatabase>['db'],
+  granularity: StatsGranularity,
+  range: { from?: string; to?: string },
+) {
+  switch (granularity) {
+    case 'day':
+      return getDailyUsage(db, range);
+    case 'week':
+      return getWeeklyUsage(db, range);
+    case 'month':
+      return getMonthlyUsage(db, range);
+    case 'year':
+      return getYearlyUsage(db, range);
+  }
+}
+
+function usageRowLabel(row: Record<string, unknown>): string {
+  return String(row.date ?? row.week ?? row.month ?? row.year ?? 'N/A');
+}
+
+function wantsJson(options: { json?: boolean }, command?: Command): boolean {
+  if (options.json) return true;
+  try {
+    return Boolean(command?.optsWithGlobals?.()?.json);
+  } catch {
+    return false;
+  }
+}
 
 program
   .name('agent-usage')
@@ -43,9 +99,39 @@ program
   .version('0.1.0');
 
 // Scan command
-program
+const scanCmd = program
   .command('scan')
-  .description('Scan session files from supported AI tools')
+  .description('Scan session files from supported AI tools');
+
+scanCmd
+  .command('history')
+  .description('Show recent scan runs')
+  .option('-n, --limit <number>', 'Number of runs to show', '20')
+  .option('--json', 'Output as JSON')
+  .action((options: { limit: string; json?: boolean }) => {
+    const config = loadConfig();
+    const { db } = initializeDatabase(config.dbPath);
+    const runs = getScanRuns(db, parseInt(options.limit, 10));
+
+    if (options.json) {
+      console.log(JSON.stringify({ runs }, null, 2));
+      return;
+    }
+
+    if (runs.length === 0) {
+      console.log('No scan runs recorded yet.');
+      return;
+    }
+
+    console.log('\nRecent scan runs:\n');
+    for (const run of runs) {
+      console.log(
+        `#${run.id}  ${run.status}  files=${run.filesScanned}  sessions=${run.sessionsFound}  warnings=${run.warningsCount}  ${run.startedAt}`,
+      );
+    }
+  });
+
+scanCmd
   .option('-p, --provider <provider>', 'Filter by provider (claude, codex, gemini)')
   .option('--path <paths...>', 'Custom paths to scan')
   .option('--json', 'Output as JSON')
@@ -53,7 +139,9 @@ program
     const config = loadConfig();
     const database = initializeDatabase(config.dbPath);
 
-    console.log('Scanning session files...\n');
+    if (!options.json) {
+      console.log('Scanning session files...\n');
+    }
 
     const result = await scanSessions(database, config, {
       provider: options.provider as Provider | undefined,
@@ -159,47 +247,141 @@ program
   });
 
 // Stats command
-program
+const statsCmd = program
   .command('stats')
-  .description('Show usage statistics')
+  .description('Show usage statistics');
+
+statsCmd
+  .command('export')
+  .description('Export usage rollups as CSV or JSON')
+  .option('-f, --format <format>', 'Output format: csv or json', 'json')
+  .option('-d, --day', 'Export daily rollups')
+  .option('-w, --week', 'Export weekly rollups')
+  .option('-m, --month', 'Export monthly rollups')
+  .option('-y, --year', 'Export yearly rollups')
+  .option('-g, --granularity <granularity>', 'Granularity: day, week, month, year')
+  .option('--from <date>', 'Start date (YYYY-MM-DD)')
+  .option('--to <date>', 'End date (YYYY-MM-DD)')
+  .option('-o, --output <file>', 'Write to file instead of stdout')
+  .option('--json', 'Emit export metadata as JSON')
+  .action((options: {
+    format: string;
+    day?: boolean;
+    week?: boolean;
+    month?: boolean;
+    year?: boolean;
+    granularity?: string;
+    from?: string;
+    to?: string;
+    output?: string;
+    json?: boolean;
+  }, command) => {
+    const json = wantsJson(options, command);
+    const config = loadConfig();
+    const { db } = initializeDatabase(config.dbPath);
+    let granularity: StatsGranularity;
+    try {
+      granularity = resolveStatsGranularity(options) ?? 'day';
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (json) {
+        console.log(JSON.stringify({ ok: false, error: message }, null, 2));
+        return;
+      }
+      console.error(message);
+      return;
+    }
+    const data = getUsageByGranularity(db, granularity, { from: options.from, to: options.to });
+
+    const format = options.format === 'csv' ? 'csv' : 'json';
+    const payload =
+      format === 'csv' ? usageRowsToCsv(data as Array<Record<string, unknown>>) : JSON.stringify(data, null, 2);
+
+    if (options.output) {
+      fs.writeFileSync(options.output, payload);
+      if (json) {
+        console.log(
+          JSON.stringify(
+            { exported: data.length, format, granularity, path: options.output },
+            null,
+            2,
+          ),
+        );
+        return;
+      }
+      console.log(`Exported ${data.length} rows to ${options.output}`);
+      return;
+    }
+
+    if (json && format === 'json') {
+      console.log(payload);
+      return;
+    }
+    if (json) {
+      console.log(JSON.stringify({ exported: data.length, format, granularity, data }, null, 2));
+      return;
+    }
+    console.log(payload);
+  });
+
+statsCmd
   .option('-d, --day', 'Show daily stats')
+  .option('-w, --week', 'Show weekly stats')
   .option('-m, --month', 'Show monthly stats')
   .option('-y, --year', 'Show yearly stats')
+  .option('-g, --granularity <granularity>', 'Granularity: day, week, month, year')
   .option('--from <date>', 'Start date (YYYY-MM-DD)')
   .option('--to <date>', 'End date (YYYY-MM-DD)')
   .option('--json', 'Output as JSON')
-  .action((options) => {
+  .action((options: {
+    day?: boolean;
+    week?: boolean;
+    month?: boolean;
+    year?: boolean;
+    granularity?: string;
+    from?: string;
+    to?: string;
+    json?: boolean;
+  }) => {
     const config = loadConfig();
     const { db } = initializeDatabase(config.dbPath);
 
-    if (options.day || options.month || options.year) {
-      let data;
-      if (options.day) {
-        data = getDailyUsage(db, { from: options.from, to: options.to });
-      } else if (options.month) {
-        data = getMonthlyUsage(db, { from: options.from, to: options.to });
-      } else {
-        data = getYearlyUsage(db, { from: options.from, to: options.to });
+    let granularity: StatsGranularity | null;
+    try {
+      granularity = resolveStatsGranularity(options);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (options.json) {
+        console.log(JSON.stringify({ ok: false, error: message }, null, 2));
+        return;
       }
+      console.error(message);
+      return;
+    }
+
+    if (granularity) {
+      const data = getUsageByGranularity(db, granularity, { from: options.from, to: options.to });
 
       if (options.json) {
-        console.log(JSON.stringify(data, null, 2));
+        console.log(JSON.stringify({ granularity, data }, null, 2));
         return;
       }
 
+      const periodLabel = granularity === 'week' ? 'Week' : granularity === 'month' ? 'Month' : granularity === 'year' ? 'Year' : 'Date';
       console.log('\nUsage Statistics:\n');
-      console.log('Date'.padEnd(15) + 'Provider'.padEnd(12) + 'Sessions'.padEnd(10) + 'Tokens'.padEnd(12) + 'Cost');
+      console.log(
+        periodLabel.padEnd(15) + 'Provider'.padEnd(12) + 'Sessions'.padEnd(10) + 'Tokens'.padEnd(12) + 'Cost',
+      );
       console.log('-'.repeat(65));
 
       for (const row of data) {
-        const r = row as any;
-        const date = r.date ?? r.month ?? r.year ?? 'N/A';
+        const r = row as Record<string, unknown>;
         console.log(
-          String(date).padEnd(15) +
+          usageRowLabel(r).padEnd(15) +
           String(r.provider).padEnd(12) +
           String(r.sessions).padEnd(10) +
           formatNumber(Number(r.totalTokens) || 0).padEnd(12) +
-          formatCurrency(Number(r.estimatedCost) || 0)
+          formatCurrency(Number(r.estimatedCost) || 0),
         );
       }
       return;
@@ -276,6 +458,87 @@ program
     console.log(`\nTotal: ${results.length} results`);
   });
 
+// Sessions commands
+const sessionsCmd = program.command('sessions').description('Session operations');
+
+sessionsCmd
+  .command('export')
+  .description('Export sessions as JSON or CSV')
+  .option('-f, --format <format>', 'Output format: csv or json', 'json')
+  .option('-p, --provider <provider>', 'Filter by provider')
+  .option('-o, --output <file>', 'Write to file instead of stdout')
+  .option('--json', 'Emit export metadata as JSON')
+  .action((options: { format: string; provider?: string; output?: string; json?: boolean }, command) => {
+    const json = wantsJson(options, command);
+    const config = loadConfig();
+    const { db } = initializeDatabase(config.dbPath);
+    const sessions = getSessions(db, {
+      provider: options.provider as Provider | undefined,
+      limit: 10_000,
+    });
+
+    const format = options.format === 'csv' ? 'csv' : 'json';
+    const payload =
+      format === 'csv'
+        ? usageRowsToCsv(sessions as Array<Record<string, unknown>>)
+        : JSON.stringify(sessions, null, 2);
+
+    if (options.output) {
+      fs.writeFileSync(options.output, payload);
+      if (json) {
+        console.log(
+          JSON.stringify({ exported: sessions.length, format, path: options.output }, null, 2),
+        );
+        return;
+      }
+      console.log(`Exported ${sessions.length} sessions to ${options.output}`);
+      return;
+    }
+
+    if (json && format === 'json') {
+      console.log(payload);
+      return;
+    }
+    if (json) {
+      console.log(JSON.stringify({ exported: sessions.length, format, sessions }, null, 2));
+      return;
+    }
+    console.log(payload);
+  });
+
+// Warnings command — parser warnings from scan history
+program
+  .command('warnings')
+  .description('List parser warnings from recent scans')
+  .option('-n, --limit <number>', 'Maximum warnings to show', '50')
+  .option('--scan-run <id>', 'Filter by scan run id')
+  .option('--json', 'Output as JSON')
+  .action((options: { limit: string; scanRun?: string; json?: boolean }) => {
+    const config = loadConfig();
+    const { db } = initializeDatabase(config.dbPath);
+    const warnings = getParserWarnings(db, {
+      scanRunId: options.scanRun ? parseInt(options.scanRun, 10) : undefined,
+      limit: parseInt(options.limit, 10),
+    });
+
+    if (options.json) {
+      console.log(JSON.stringify({ warnings }, null, 2));
+      return;
+    }
+
+    if (warnings.length === 0) {
+      console.log('No parser warnings recorded.');
+      return;
+    }
+
+    console.log('\nParser warnings:\n');
+    for (const w of warnings) {
+      const code = w.code ? `[${w.code}] ` : '';
+      const line = w.line != null ? `:${w.line}` : '';
+      console.log(`  ${w.severity} ${code}${w.file}${line} — ${w.message}`);
+    }
+  });
+
 // Pricing commands
 const pricingCmd = program
   .command('pricing')
@@ -331,17 +594,31 @@ pricingCmd
 pricingCmd
   .command('import <file>')
   .description('Import pricing from JSON file')
-  .action((file: string) => {
+  .option('--json', 'Output as JSON')
+  .action((file: string, options: { json?: boolean }) => {
     const config = loadConfig();
     const { db } = initializeDatabase(config.dbPath);
 
     try {
       const content = fs.readFileSync(file, 'utf-8');
-      const models = JSON.parse(content);
+      const parsed = JSON.parse(content);
+      const models = Array.isArray(parsed) ? parsed : parsed.models;
 
       if (!Array.isArray(models)) {
-        console.error('Invalid format: expected an array of pricing models');
+        const message =
+          'Invalid format: expected an array of pricing models or { "models": [...] }';
+        if (options.json) {
+          console.log(JSON.stringify({ ok: false, error: message }, null, 2));
+          return;
+        }
+        console.error(message);
         return;
+      }
+
+      if (!Array.isArray(parsed) && parsed.modelAliases) {
+        console.warn(
+          'Note: modelAliases in pricing JSON are not imported automatically. Add them to agent-usage.config.json.',
+        );
       }
 
       let imported = 0;
@@ -359,9 +636,18 @@ pricingCmd
         imported++;
       }
 
+      if (options.json) {
+        console.log(JSON.stringify({ ok: true, imported, file }, null, 2));
+        return;
+      }
       console.log(`Imported ${imported} pricing models`);
     } catch (e) {
-      console.error(`Failed to import: ${e instanceof Error ? e.message : String(e)}`);
+      const message = e instanceof Error ? e.message : String(e);
+      if (options.json) {
+        console.log(JSON.stringify({ ok: false, error: message }, null, 2));
+        return;
+      }
+      console.error(`Failed to import: ${message}`);
     }
   });
 
@@ -369,7 +655,8 @@ pricingCmd
   .command('export')
   .description('Export pricing to JSON')
   .option('-o, --output <file>', 'Output file (default: stdout)')
-  .action((options) => {
+  .option('--json', 'Output result metadata as JSON (models go to stdout or --output file)')
+  .action((options: { output?: string; json?: boolean }) => {
     const config = loadConfig();
     const { db } = initializeDatabase(config.dbPath);
 
@@ -378,7 +665,13 @@ pricingCmd
 
     if (options.output) {
       fs.writeFileSync(options.output, json);
+      if (options.json) {
+        console.log(JSON.stringify({ exported: models.length, path: options.output }, null, 2));
+        return;
+      }
       console.log(`Exported ${models.length} pricing models to ${options.output}`);
+    } else if (options.json) {
+      console.log(json);
     } else {
       console.log(json);
     }
@@ -392,21 +685,39 @@ const privacyCmd = program
 privacyCmd
   .command('status')
   .description('Show current privacy settings')
-  .action(() => {
+  .option('--json', 'Output as JSON')
+  .action((options: { json?: boolean }) => {
     const config = loadConfig();
     const { db } = initializeDatabase(config.dbPath);
 
     const mode = getSetting(db, 'privacyMode') || config.privacyMode;
+    const payload = {
+      privacyMode: mode,
+      storeRawRecords: config.storeRawRecords,
+      estimatePromptOnlySources: config.estimatePromptOnlySources ?? false,
+    };
+
+    if (options.json) {
+      console.log(JSON.stringify(payload, null, 2));
+      return;
+    }
     console.log(`\nPrivacy mode: ${mode}`);
     console.log(`Store raw records: ${config.storeRawRecords}`);
+    console.log(`Estimate prompt-only sources: ${payload.estimatePromptOnlySources}`);
   });
 
 privacyCmd
   .command('set <mode>')
   .description('Set privacy mode (disabled, preview, full, raw)')
-  .action((mode: string) => {
+  .option('--json', 'Output as JSON')
+  .action((mode: string, options: { json?: boolean }) => {
     if (!['disabled', 'preview', 'full', 'raw'].includes(mode)) {
-      console.error('Invalid mode. Must be: disabled, preview, full, raw');
+      const message = 'Invalid mode. Must be: disabled, preview, full, raw';
+      if (options.json) {
+        console.log(JSON.stringify({ ok: false, error: message }, null, 2));
+        return;
+      }
+      console.error(message);
       return;
     }
 
@@ -414,6 +725,10 @@ privacyCmd
     const { db } = initializeDatabase(config.dbPath);
 
     setSetting(db, 'privacyMode', mode);
+    if (options.json) {
+      console.log(JSON.stringify({ ok: true, privacyMode: mode }, null, 2));
+      return;
+    }
     console.log(`Privacy mode set to: ${mode}`);
   });
 
@@ -432,8 +747,9 @@ privacyCmd
       return;
     }
 
-    console.log(`Purged content from ${result.messages} message rows.`);
-    console.log(`Removed ${result.fts} full-text search entries.`);
+    console.log(`Purged content from ${result.messages} message row(s).`);
+    console.log(`Cleared metadata from ${result.sessions} session row(s).`);
+    console.log(`Removed ${result.fts} full-text search entr${result.fts === 1 ? 'y' : 'ies'}.`);
     console.log('Content purged successfully.');
   });
 
@@ -442,8 +758,19 @@ program
   .command('watch')
   .description('Watch for session file changes')
   .option('-p, --provider <provider>', 'Filter by provider')
-  .action(async (options) => {
-    console.log('Watching for session changes... (Press Ctrl+C to stop)');
+  .option('--json', 'Emit scan events as JSON lines')
+  .action(async (options: { provider?: string; json?: boolean }) => {
+    const emit = (event: Record<string, unknown>) => {
+      if (options.json) {
+        console.log(JSON.stringify({ ...event, timestamp: new Date().toISOString() }));
+      }
+    };
+
+    if (!options.json) {
+      console.log('Watching for session changes... (Press Ctrl+C to stop)');
+    } else {
+      emit({ event: 'watch_started', provider: options.provider ?? null });
+    }
 
     const chokidar = await import('chokidar');
     const config = loadConfig();
@@ -465,19 +792,26 @@ program
 
     let debounceTimer: NodeJS.Timeout | null = null;
 
-    const handleChange = async (filePath: string) => {
+    const handleChange = async (filePath: string, kind: 'add' | 'change') => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
-        console.log(`Change detected: ${filePath}`);
-        await scanSessions(database, config, {
+        if (!options.json) {
+          console.log(`Change detected: ${filePath}`);
+        } else {
+          emit({ event: 'file_changed', kind, path: filePath });
+        }
+        const result = await scanSessions(database, config, {
           provider: options.provider as Provider | undefined,
           paths: [filePath],
         });
+        if (options.json) {
+          emit({ event: 'scan_complete', path: filePath, ...result });
+        }
       }, 500);
     };
 
-    watcher.on('add', handleChange);
-    watcher.on('change', handleChange);
+    watcher.on('add', (p: string) => void handleChange(p, 'add'));
+    watcher.on('change', (p: string) => void handleChange(p, 'change'));
 
     // Keep process alive
     await new Promise(() => {});
@@ -488,25 +822,63 @@ program
   .command('dashboard')
   .description('Start the local web dashboard')
   .option('-p, --port <port>', 'Port to listen on', '3000')
+  .option('-H, --host <host>', 'Host to bind', '127.0.0.1')
   .option('--no-open', 'Do not open the browser automatically')
-  .action(async (options) => {
+  .option('--json', 'Output server metadata as JSON')
+  .action(async (options: { port: string; host: string; open: boolean; json?: boolean }) => {
     const { spawn } = await import('child_process');
-    const repoRoot = findRepoRoot();
+    const { createRequire } = await import('module');
+    const target = resolveWebAppTarget();
 
-    if (!repoRoot) {
-      console.error('Could not locate the project root. Run "pnpm dev" from the repository.');
+    if (!target) {
+      const message =
+        'Could not locate the web dashboard. Build it with "pnpm build" or run from a git checkout.';
+      if (options.json) {
+        console.log(JSON.stringify({ ok: false, error: message }, null, 2));
+        return;
+      }
+      console.error(message);
       return;
     }
 
-    console.log(`Starting dashboard on http://localhost:${options.port} ...`);
-    const child = spawn('pnpm', ['--filter', '@agent-usage/web', 'dev', '--port', String(options.port)], {
-      cwd: repoRoot,
-      stdio: 'inherit',
-      env: { ...process.env },
-    });
+    const host = options.host || '127.0.0.1';
+    const port = String(options.port);
+    const url = `http://${host}:${port}`;
 
-    if (options.open) {
-      setTimeout(() => void openBrowser(`http://localhost:${options.port}`), 2500);
+    if (!options.json) {
+      const mode = target.kind === 'production' ? 'production build' : 'dev server';
+      console.log(`Starting dashboard (${mode}) on ${url} ...`);
+    }
+
+    const child =
+      target.kind === 'production'
+        ? (() => {
+            const require = createRequire(path.join(target.webDir, 'package.json'));
+            const nextBin = require.resolve('next/dist/bin/next');
+            return spawn(process.execPath, [nextBin, 'start', '--hostname', host, '--port', port], {
+              cwd: target.webDir,
+              stdio: options.json ? 'ignore' : 'inherit',
+              env: { ...process.env },
+            });
+          })()
+        : spawn(
+            'pnpm',
+            ['--filter', '@agent-usage/web', 'dev', '--hostname', host, '--port', port],
+            {
+              cwd: target.repoRoot,
+              stdio: options.json ? 'ignore' : 'inherit',
+              env: { ...process.env },
+            },
+          );
+
+    if (options.open && !options.json) {
+      setTimeout(() => void openBrowser(url), 2500);
+    }
+
+    if (options.json) {
+      // Brief delay so the child process is assigned a pid before we report it.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      console.log(JSON.stringify({ url, port: Number(port), pid: child.pid ?? null }, null, 2));
     }
 
     child.on('exit', (code) => process.exit(code ?? 0));
@@ -641,14 +1013,20 @@ program
   .option('--json', 'Output as JSON')
   .action((options) => {
     const config = loadConfig();
+    const configValidation = validateConfig();
     const nodeVersion = process.version;
     const nodeOk = Number(process.versions.node.split('.')[0]) >= 20;
 
     let dbPath = '';
     let dbOk = false;
+    let schemaVersion: number | null = null;
+    let sqlite: import('better-sqlite3').Database | undefined;
     try {
-      dbPath = initializeDatabase(config.dbPath).path;
+      const database = initializeDatabase(config.dbPath);
+      dbPath = database.path;
+      sqlite = database.sqlite;
       dbOk = true;
+      schemaVersion = getSchemaVersion(sqlite);
     } catch {
       dbOk = false;
     }
@@ -683,7 +1061,12 @@ program
     if (options.json) {
       console.log(
         JSON.stringify(
-          { node: { version: nodeVersion, ok: nodeOk }, database: { path: dbPath, ok: dbOk }, providers: providerReport },
+          {
+            node: { version: nodeVersion, ok: nodeOk },
+            database: { path: dbPath, ok: dbOk, schemaVersion },
+            config: configValidation,
+            providers: providerReport,
+          },
           null,
           2,
         ),
@@ -694,6 +1077,18 @@ program
     console.log('\nSystem Health Check:\n');
     console.log(`Node.js: ${nodeVersion} ${nodeOk ? '✓' : '✗ (v20+ required)'}`);
     console.log(`Database: ${dbOk ? `${dbPath} ✓` : '✗ failed to open'}`);
+    if (configValidation.path) {
+      console.log(
+        `Config (${configValidation.path}): ${configValidation.ok ? '✓ valid' : '✗ invalid'}`,
+      );
+      if (configValidation.errors?.length) {
+        for (const err of configValidation.errors) {
+          console.log(`  - ${err}`);
+        }
+      }
+    } else {
+      console.log('Config: using defaults (no config file found)');
+    }
     console.log('\nProviders:');
     for (const a of providerReport) {
       console.log(`  ${a.label.padEnd(18)} ${a.installed ? 'detected' : 'not found'}`);
@@ -706,12 +1101,15 @@ program
   .command('seed')
   .description('Generate sample data for demo')
   .option('-n, --sessions <number>', 'Number of sessions to generate', '10')
-  .action((options) => {
+  .option('--json', 'Output as JSON')
+  .action((options: { sessions: string; json?: boolean }) => {
     const config = loadConfig();
     const { sqlite } = initializeDatabase(config.dbPath);
 
-    const count = parseInt(options.sessions);
-    console.log(`Generating ${count} sample sessions...`);
+    const count = parseInt(options.sessions, 10);
+    if (!options.json) {
+      console.log(`Generating ${count} sample sessions...`);
+    }
 
     // Generate sample data
     const providers: Provider[] = ['claude', 'codex', 'gemini'];
@@ -741,26 +1139,35 @@ program
         inputTokens,
         outputTokens,
         inputTokens + outputTokens,
-        (inputTokens * 0.0000025 + outputTokens * 0.00001),
+        inputTokens * 0.0000025 + outputTokens * 0.00001,
         model,
         new Date().toISOString(),
       );
     }
 
     refreshUsageRollups(sqlite);
+    if (options.json) {
+      console.log(JSON.stringify({ ok: true, sessionsGenerated: count }, null, 2));
+      return;
+    }
     console.log(`Generated ${count} sample sessions`);
   });
 
 /** Walk up from the CLI location to find the monorepo root (has pnpm-workspace.yaml). */
-function findRepoRoot(): string | null {
-  let dir = process.cwd();
-  for (let i = 0; i < 8; i++) {
-    if (fs.existsSync(path.join(dir, 'pnpm-workspace.yaml'))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+function usageRowsToCsv(rows: Array<Record<string, unknown>>): string {
+  if (rows.length === 0) return '';
+  const headers = Object.keys(rows[0]);
+  const escape = (value: unknown) => {
+    const text = value == null ? '' : String(value);
+    return text.includes(',') || text.includes('"') || text.includes('\n')
+      ? `"${text.replace(/"/g, '""')}"`
+      : text;
+  };
+  const lines = [headers.join(',')];
+  for (const row of rows) {
+    lines.push(headers.map((h) => escape(row[h])).join(','));
   }
-  return null;
+  return lines.join('\n');
 }
 
 /** Open a URL in the default browser, cross-platform. */

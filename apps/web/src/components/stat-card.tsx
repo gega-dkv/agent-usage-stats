@@ -1,8 +1,11 @@
+import type { ReactNode } from 'react';
+import { Badge } from '@/components/ui/badge';
+
 type StatCardProps = {
   label: string;
   value: string;
   subValue?: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   gradient: string;
   trend?: { value: string; positive: boolean };
 };
@@ -21,15 +24,9 @@ export function StatCard({ label, value, subValue, icon, gradient, trend }: Stat
             {icon}
           </div>
           {trend && (
-            <span
-              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
-                trend.positive
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-                  : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-              }`}
-            >
+            <Badge variant={trend.positive ? 'secondary' : 'destructive'}>
               {trend.positive ? '↑' : '↓'} {trend.value}
-            </span>
+            </Badge>
           )}
         </div>
         <p className="mt-4 text-sm font-medium text-muted-foreground">{label}</p>

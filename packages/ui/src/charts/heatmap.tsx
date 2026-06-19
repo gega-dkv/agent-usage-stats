@@ -1,3 +1,8 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { shortNumber } from './chart-utils.js';
+
 type CalendarHeatmapData = {
   date: string;
   value: number;
@@ -5,143 +10,103 @@ type CalendarHeatmapData = {
 
 type CalendarHeatmapProps = {
   data: CalendarHeatmapData[];
-  width?: number;
-  height?: number;
-  title?: string;
-  colorScale?: string[];
+  weeks?: number;
+  formatValue?: (value: number) => string;
 };
 
-export function CalendarHeatmap({
-  data,
-  width = 700,
-  height = 150,
-  title,
-  colorScale = [
-    'hsl(var(--muted))',
-    'hsl(150, 50%, 70%)',
-    'hsl(150, 50%, 50%)',
-    'hsl(150, 50%, 30%)',
-  ],
-}: CalendarHeatmapProps) {
+export function CalendarHeatmap({ data, weeks = 26, formatValue }: CalendarHeatmapProps) {
+  const [dark, setDark] = useState(false);
+
+  useEffect(() => {
+    setDark(document.documentElement.classList.contains('dark'));
+    const observer = new MutationObserver(() => {
+      setDark(document.documentElement.classList.contains('dark'));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+
   if (data.length === 0) {
     return (
       <div
-        className="flex items-center justify-center text-muted-foreground"
-        style={{ width, height }}
+        className="flex h-32 items-center justify-center text-sm text-muted-foreground"
+        role="img"
+        aria-label="No data available"
       >
         No data available
       </div>
     );
   }
 
-  const maxValue = Math.max(...data.map((d) => d.value));
-  const padding = { top: 20, right: 20, bottom: 20, left: 20 };
-  const cellSize = 15;
-  const cellGap = 3;
+  const fmt = formatValue || shortNumber;
+  const map = new Map(data.map((d) => [d.date, d.value]));
+  const max = Math.max(...data.map((d) => d.value), 1);
+  const cell = 14;
+  const gap = 3;
+  const w = weeks * (cell + gap) + 30;
+  const h = 7 * (cell + gap) + 20;
 
-  const valueToColor = (value: number) => {
-    if (value === 0) return colorScale[0];
-    const ratio = value / maxValue;
-    const index = Math.min(
-      Math.ceil(ratio * (colorScale.length - 1)),
-      colorScale.length - 1,
-    );
-    return colorScale[index];
-  };
-
-  // Generate date map for quick lookup
-  const dateMap = new Map(data.map((d) => [d.date, d.value]));
-
-  // Generate calendar grid (last 365 days)
   const today = new Date();
-  const days: Array<{ date: string; value: number; dayOfWeek: number; week: number }> = [];
+  const startDay = new Date(today);
+  startDay.setDate(today.getDate() - weeks * 7 + 1);
 
-  for (let i = 364; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(date.getDate() - i);
-    const dateStr = date.toISOString().split('T')[0];
-    const dayOfWeek = date.getDay();
+  const cells: { x: number; y: number; date: string; value: number; intensity: number }[] = [];
+  for (let i = 0; i < weeks * 7; i++) {
+    const d = new Date(startDay);
+    d.setDate(startDay.getDate() + i);
+    const dateStr = d.toISOString().split('T')[0];
+    const value = map.get(dateStr) || 0;
+    const intensity = value / max;
+    const dow = d.getDay();
     const week = Math.floor(i / 7);
-
-    days.push({
+    cells.push({
+      x: 30 + week * (cell + gap),
+      y: 10 + dow * (cell + gap),
       date: dateStr,
-      value: dateMap.get(dateStr) || 0,
-      dayOfWeek,
-      week,
+      value,
+      intensity,
     });
   }
 
-  const totalWeeks = Math.ceil(365 / 7);
+  function color(intensity: number) {
+    if (intensity === 0) return dark ? 'hsl(220, 13%, 18%)' : 'hsl(214, 32%, 91%)';
+    if (intensity < 0.25) return dark ? 'hsl(217, 91%, 30%)' : 'hsl(217, 91%, 90%)';
+    if (intensity < 0.5) return dark ? 'hsl(217, 91%, 45%)' : 'hsl(217, 91%, 70%)';
+    if (intensity < 0.75) return dark ? 'hsl(217, 91%, 60%)' : 'hsl(217, 91%, 55%)';
+    return dark ? 'hsl(217, 91%, 70%)' : 'hsl(217, 91%, 40%)';
+  }
 
   return (
-    <div className="relative">
-      {title && <h3 className="text-sm font-medium mb-2">{title}</h3>}
-      <svg width={width} height={height} className="w-full h-auto">
-        {/* Day labels */}
-        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => (
-          <text
-            key={day}
-            x={padding.left - 5}
-            y={padding.top + i * (cellSize + cellGap) + cellSize / 2 + 4}
-            textAnchor="end"
-            className="fill-current text-xs"
-            style={{ color: 'hsl(var(--muted-foreground))' }}
-          >
-            {i % 2 === 0 ? day : ''}
-          </text>
-        ))}
-
-        {/* Calendar cells */}
-        {days.map((day, i) => {
-          const x = padding.left + (day.week % totalWeeks) * (cellSize + cellGap);
-          const y = padding.top + day.dayOfWeek * (cellSize + cellGap);
-
-          return (
-            <rect
-              key={i}
-              x={x}
-              y={y}
-              width={cellSize}
-              height={cellSize}
-              fill={valueToColor(day.value)}
-              rx={2}
-              className="hover:stroke-foreground hover:stroke-2"
+    <div className="overflow-x-auto">
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full min-w-[600px]" role="img" aria-label="Calendar heatmap">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) =>
+          i % 2 === 0 ? (
+            <text
+              key={day}
+              x={26}
+              y={10 + i * (cell + gap) + cell - 3}
+              textAnchor="end"
+              fontSize="9"
+              className="fill-muted-foreground"
             >
-              <title>{`${day.date}: ${day.value}`}</title>
-            </rect>
-          );
-        })}
-
-        {/* Legend */}
-        <g transform={`translate(${width - 100}, ${padding.top})`}>
-          <text
-            x={0}
-            y={0}
-            className="fill-current text-xs"
-            style={{ color: 'hsl(var(--muted-foreground))' }}
-          >
-            Less
-          </text>
-          {colorScale.map((color, i) => (
-            <rect
-              key={i}
-              x={30 + i * (cellSize + 2)}
-              y={-10}
-              width={cellSize}
-              height={cellSize}
-              fill={color}
-              rx={2}
-            />
-          ))}
-          <text
-            x={30 + colorScale.length * (cellSize + 2) + 5}
-            y={0}
-            className="fill-current text-xs"
-            style={{ color: 'hsl(var(--muted-foreground))' }}
-          >
-            More
-          </text>
-        </g>
+              {day}
+            </text>
+          ) : null,
+        )}
+        {cells.map((c, i) => (
+          <rect
+            key={i}
+            x={c.x}
+            y={c.y}
+            width={cell}
+            height={cell}
+            fill={color(c.intensity)}
+            rx="2"
+            className="transition-opacity hover:opacity-80"
+            tabIndex={0}
+            aria-label={`${c.date}: ${fmt(c.value)}`}
+          />
+        ))}
       </svg>
     </div>
   );

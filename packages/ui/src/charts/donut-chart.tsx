@@ -1,3 +1,5 @@
+import { CHART_COLORS, shortNumber } from './chart-utils.js';
+
 type DonutChartData = {
   label: string;
   value: number;
@@ -20,8 +22,10 @@ export function ProviderDonutChart({
   if (data.length === 0) {
     return (
       <div
-        className="flex items-center justify-center text-muted-foreground"
+        className="flex items-center justify-center text-sm text-muted-foreground"
         style={{ width: size, height: size }}
+        role="img"
+        aria-label="No data available"
       >
         No data available
       </div>
@@ -29,100 +33,69 @@ export function ProviderDonutChart({
   }
 
   const total = data.reduce((sum, d) => sum + d.value, 0);
-  const format = formatValue || ((v: number) => v.toLocaleString());
-
-  const defaultColors = [
-    'hsl(222.2, 47.4%, 11.2%)',
-    'hsl(210, 40%, 50%)',
-    'hsl(150, 50%, 40%)',
-    'hsl(30, 80%, 50%)',
-    'hsl(280, 60%, 50%)',
-  ];
-
+  const fmt = formatValue || shortNumber;
+  const r = size / 2 - 10;
+  const inner = r * 0.6;
   const cx = size / 2;
   const cy = size / 2;
-  const radius = size / 2 - 20;
-  const innerRadius = radius * 0.6;
 
-  let currentAngle = -90;
-
+  let acc = 0;
   const segments = data.map((d, i) => {
-    const percentage = d.value / total;
-    const angle = percentage * 360;
-    const startAngle = currentAngle;
-    const endAngle = currentAngle + angle;
-    currentAngle = endAngle;
-
-    const startRad = (startAngle * Math.PI) / 180;
-    const endRad = (endAngle * Math.PI) / 180;
-
-    const x1 = cx + radius * Math.cos(startRad);
-    const y1 = cy + radius * Math.sin(startRad);
-    const x2 = cx + radius * Math.cos(endRad);
-    const y2 = cy + radius * Math.sin(endRad);
-
-    const ix1 = cx + innerRadius * Math.cos(startRad);
-    const iy1 = cy + innerRadius * Math.sin(startRad);
-    const ix2 = cx + innerRadius * Math.cos(endRad);
-    const iy2 = cy + innerRadius * Math.sin(endRad);
-
-    const largeArc = angle > 180 ? 1 : 0;
-
-    const pathD = [
-      `M ${x1} ${y1}`,
-      `A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2}`,
-      `L ${ix2} ${iy2}`,
-      `A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${ix1} ${iy1}`,
-      'Z',
-    ].join(' ');
-
-    const color = d.color || defaultColors[i % defaultColors.length];
-
-    return { pathD, color, percentage, label: d.label, value: d.value };
+    const angle = (d.value / total) * Math.PI * 2;
+    const start = acc;
+    const end = acc + angle;
+    acc = end;
+    return { ...d, start, end, color: d.color || CHART_COLORS[i % CHART_COLORS.length] };
   });
 
+  function arc(start: number, end: number) {
+    const x1 = cx + r * Math.cos(start - Math.PI / 2);
+    const y1 = cy + r * Math.sin(start - Math.PI / 2);
+    const x2 = cx + r * Math.cos(end - Math.PI / 2);
+    const y2 = cy + r * Math.sin(end - Math.PI / 2);
+    const x3 = cx + inner * Math.cos(end - Math.PI / 2);
+    const y3 = cy + inner * Math.sin(end - Math.PI / 2);
+    const x4 = cx + inner * Math.cos(start - Math.PI / 2);
+    const y4 = cy + inner * Math.sin(start - Math.PI / 2);
+    const large = end - start > Math.PI ? 1 : 0;
+    return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${inner} ${inner} 0 ${large} 0 ${x4} ${y4} Z`;
+  }
+
   return (
-    <div className="flex items-center gap-4">
+    <div className="flex items-center gap-6">
       {title && <h3 className="text-sm font-medium">{title}</h3>}
-      <svg width={size} height={size} className="flex-shrink-0">
-        {segments.map((seg, i) => (
+      <svg width={size} height={size} className="shrink-0" role="img" aria-label="Provider donut chart">
+        {segments.map((s, i) => (
           <path
             key={i}
-            d={seg.pathD}
-            fill={seg.color}
-            className="hover:opacity-80 transition-opacity"
+            d={arc(s.start, s.end)}
+            fill={s.color}
+            className="transition-opacity hover:opacity-80"
+            tabIndex={0}
+            aria-label={`${s.label}: ${fmt(s.value)}`}
           />
         ))}
         <text
           x={cx}
-          y={cy - 8}
+          y={cy - 4}
           textAnchor="middle"
-          className="fill-current text-lg font-bold"
-          style={{ color: 'hsl(var(--foreground))' }}
+          fontSize="14"
+          fontWeight="600"
+          className="fill-foreground"
         >
-          {format(total)}
+          {fmt(total)}
         </text>
-        <text
-          x={cx}
-          y={cy + 12}
-          textAnchor="middle"
-          className="fill-current text-xs"
-          style={{ color: 'hsl(var(--muted-foreground))' }}
-        >
+        <text x={cx} y={cy + 12} textAnchor="middle" fontSize="10" className="fill-muted-foreground">
           Total
         </text>
       </svg>
-      <div className="space-y-2">
-        {segments.map((seg, i) => (
+      <div className="flex flex-col gap-2">
+        {segments.map((s, i) => (
           <div key={i} className="flex items-center gap-2 text-sm">
-            <div
-              className="w-3 h-3 rounded-full"
-              style={{ backgroundColor: seg.color }}
-            />
-            <span className="text-muted-foreground">{seg.label}</span>
-            <span className="font-mono">{format(seg.value)}</span>
-            <span className="text-muted-foreground">
-              ({(seg.percentage * 100).toFixed(1)}%)
+            <div className="size-3 rounded-sm" style={{ backgroundColor: s.color }} />
+            <span className="text-foreground">{s.label}</span>
+            <span className="ml-auto font-mono text-xs text-muted-foreground">
+              {((s.value / total) * 100).toFixed(1)}%
             </span>
           </div>
         ))}

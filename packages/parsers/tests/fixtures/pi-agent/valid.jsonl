@@ -1,0 +1,2 @@
+{"sessionId":"pi-1","role":"user","content":"Create a CLI command","model":"gpt-4o","usage":{"input_tokens":500,"output_tokens":0},"timestamp":"2026-06-18T12:00:00Z"}
+{"role":"assistant","content":"Here is the command.","model":"gpt-4o","usage":{"input_tokens":0,"output_tokens":180,"cache_read_tokens":20},"timestamp":"2026-06-18T12:01:00Z"}

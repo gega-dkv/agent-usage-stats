@@ -1,236 +1,191 @@
 # Implementation Plan
 
-This project is currently a usable prototype, not acceptance-ready. The main gaps are validation failures, missing desktop packaging, incomplete CLI/web contract coverage, and several data integrity/privacy details that need to be made explicit.
+This project is currently a usable prototype, not acceptance-ready. The main gaps are validation/schema drift, missing desktop packaging, incomplete CLI `--json` coverage, and several data integrity/privacy details that need to be made explicit.
+
+## Progress Snapshot
+
+| Area | Status |
+|------|--------|
+| Phase 0: Make the repo honest | **Done** — typecheck, CI, web runtime warnings |
+| CI (lint, typecheck, test, build) | **Done** — `.github/workflows/ci.yml` |
+| `@agent-usage/ui` in build/typecheck | **Done** — root `package.json` |
+| Provider registry (19 agents) | **Done** — `packages/shared/src/providers.ts` |
+| Parsers (Claude, Codex, Gemini) | **Done** |
+| Phase 2: Provider Expansion (16 parsers) | **Done** — all registry providers wired except detection-only Crush usage |
+| SQLite FTS + rollups | **Done** |
+| Stats CLI (day/month/year, ranges, summary) | **Done** |
+| Provider CLI (`providers`, `detect`, `doctor`, `inspect-schema`) | **Done** |
+| Deduplication (full-file SHA-256) | **Mostly done** — see Phase 1.4 |
+| Pricing fallback flags (`cost_estimated`, `recorded_cost`) | **Done** — config + scan wiring |
+| Incremental scan (mtime + hash skip) | **Done** — `scanned_files` table |
+| Zod schemas + example config vs registry | **Done** — Phase 1.0 |
+| Phase 1.0: Schema, config, migration | **Done** |
+| Phase 1.1: Normalized types + persistence | **Done** |
+| CLI `--json` on all commands | **Done** — Phase 3.1 |
+| Phase 3: CLI Contract Completion | **Done** |
+| Phase 4: Web App Completion | **Done** — dashboard, prompts, sessions, pricing, settings, providers |
+| Phase 5: Pricing And Aliases | **Done** — local bundled pricing, model aliases, provider fallbacks |
+| Phase 8.1: CLI/npm distribution | **Done** — publishable `@agent-usage/cli`, bundled web dashboard, Homebrew template |
+| Phase 8.2: Tauri desktop | **Scaffolded** — `apps/desktop`, `pnpm desktop:dev` / `desktop:build`; CI desktop build optional |
+| Desktop (`apps/desktop`) | **Scaffolded** — see `apps/desktop/README.md` for Rust/Tauri prerequisites |
+
+---
+
+## Non-Goals (Out of Scope)
+
+The following are explicitly **not** planned for acceptance-ready v1:
+
+- **Billing API sync** — no OpenAI/Anthropic/Google invoice or usage API integration; costs are simulated from local session data and editable pricing tables.
+- **Budgets and alerts** — no spend thresholds, email/push notifications, or quota enforcement.
+- **Cloud sync / team features** — no multi-user accounts, shared databases, or remote aggregation.
+- **Real invoice reconciliation** — provider-recorded costs are best-effort from session logs, not audited against billing statements.
+
+Provider evaluation backlog (not in v1 registry): Windsurf, Cline, Continue, Roo Code, Amazon Q Developer, Zed AI.
+
+---
 
 ## Phase 0: Make The Repo Honest
 
-1. Fix `pnpm typecheck`.
-   - Remove unused `React` imports from `packages/ui/src/charts/*`.
-   - Add `@agent-usage/ui` to the root `typecheck` and `build` scripts so package failures cannot be hidden.
+**Done.**
 
-2. Add CI.
-   - Create GitHub Actions workflow for `pnpm install`, `pnpm lint`, `pnpm typecheck`, `pnpm test:run`, and `pnpm build`.
-   - Cache pnpm store.
+1. ~~Fix `pnpm typecheck`.~~ **Done.**
+   - ~~Remove unused `React` imports from `packages/ui/src/charts/*` if any remain.~~ Charts use JSX without unused React imports.
+   - ~~Add `@agent-usage/ui` to the root `typecheck` and `build` scripts~~ **Done.**
 
-3. Fix web runtime warnings.
-   - Resolve the React `<title>` warning observed in the Next.js dev server.
+2. ~~Add CI.~~ **Done.**
+   - ~~Create GitHub Actions workflow for `pnpm install`, `pnpm lint`, `pnpm typecheck`, `pnpm test:run`, and `pnpm build`.~~
+   - ~~Cache pnpm store.~~
+
+3. ~~Fix web runtime warnings.~~ **Done.**
+   - ~~Resolve the React `<title>` warning observed in the Next.js dev server.~~ Replaced SVG `<title>` children in heatmap cells with `aria-label`; root layout uses App Router `metadata` export (no duplicate `<title>`).
+
+---
 
 ## Phase 1: Data Correctness
 
+### Phase 1.0: Schema, Config, and Migration Alignment *(done)*
+
+1. Align validation with the 19-provider registry. **Done.**
+   - Extend `providerSchema` and `appConfigSchema` in `packages/shared/src/schemas.ts` to all registered providers (derive from `PROVIDER_REGISTRY` where possible).
+   - Extend `pricingProviderSchema` for `qwen`, `moonshot`, and `other`.
+   - Update `getDefaultConfig()` to build per-provider entries from the registry defaults.
+   - Update `agent-usage.config.example.json` with all toggles: `resimulateRecordedCosts`, `estimatePromptOnlySources`, and optional per-provider enable/path overrides.
+
+2. Add DB schema versioning and upgrade path. **Done** — `schema_version` 3; migrations for Phase 1.1 columns + `scanned_files`.
+
+3. Validate config at load time. **Done** — Zod parse in `loadConfig()` with stderr warnings; `validateConfig()` for `doctor`.
+
+### Phase 1.1: Normalized Types and Persistence
+
 1. Expand normalized provider types.
-   - Add `ProviderId` for existing and new providers: `claude`, `codex`, `gemini`, `opencode`, `qwen`, `goose`, `droid`, `amp`, `codebuff`, `kimi`, `copilot`, `openclaw`, `hermes`, `pi-agent`, `kilo`, `aider`, `cursor`, `specstory`, and `crush`.
-   - Add `ProviderSupportLevel`: `exact-usage`, `partial-usage`, `prompt-history-only`, `detected-only`, `unsupported`.
-   - Add `UsageConfidence`: `exact`, `cumulative-delta`, `provider-recorded-cost`, `estimated-from-text`, `metadata-only`, `unavailable`.
-   - Add expanded token fields: `cacheCreationTokens`, `cacheReadTokens`, `toolTokens`.
-   - Add `CostTotals` with recorded cost, simulated cost, pricing source, currency, and estimated flag.
-   - Add `sourcePath`, `storageKind`, `supportLevel`, `usageConfidence`, `messageCount`, `promptCount`, `warnings`, and `rawRetention` to normalized sessions.
-   - Add `contentHidden`, provider id, usage confidence, total tokens, recorded cost, simulated cost, and metadata to normalized messages.
+   - ~~Add `Provider` union for all 19 providers~~ **Done** in `types.ts`.
+   - ~~Add `ProviderSupportLevel` and `UsageConfidence`~~ **Done** in `providers.ts`; **persisted** on sessions/messages + DB columns.
+   - Add expanded token fields: `cacheCreationTokens`, `cacheReadTokens`, `toolTokens`. **Done.**
+   - Add `CostTotals` with recorded cost, simulated cost, pricing source, currency, and estimated flag. **Done.**
+   - Add `sourcePath`, `storageKind`, `supportLevel`, `usageConfidence`, `messageCount`, `promptCount`, `warnings`, and `rawRetention` to normalized sessions. **Done.**
+   - Add `contentHidden`, provider id, usage confidence, total tokens, recorded cost, simulated cost, and metadata to normalized messages. **Done.**
 
-2. Replace the parser interface.
-   - Support parser-owned discovery via `discover(context)`.
-   - Change `canParse` to accept a discovered source instead of raw path/sample.
-   - Change `parse` to accept `ParseOptions`.
-   - Add `DiscoveredSource` with provider, path, storage kind, priority, and metadata.
-   - Add `ParseOptions` with privacy mode, timezone, and `allowExperimentalParsers`.
+2. Replace the parser interface. **Done (minimal)** — `DiscoveredSource`, `ParseOptions`, optional `discover()` on `ProviderParser`; existing `canParse(path, sample)` retained for backward compatibility.
 
-3. Expand parser warning model.
-   - Add typed parser warning codes: `missing-file`, `unknown-schema`, `missing-token-fields`, `missing-model`, `missing-timestamp`, `sqlite-table-missing`, `json-parse-error`, `cost-unavailable`, `prompt-storage-disabled`, and `detected-only`.
-   - Persist warnings per source and expose them in CLI and web.
+3. Expand parser warning model. **Done** — typed codes + DB column; Claude/Codex/Gemini set codes; `sqlite-locked` stub for Phase 2 provider DBs.
 
-4. Fix deduplication.
-   - Add a unique index for `provider + sessionId + fileHash`.
-   - Hash the full file content or a streaming hash, not only the first sample.
+4. Fix deduplication. **Done**
+   - ~~Hash the full file content~~ **Done** — SHA-256 of entire file in `scan.ts`.
+   - Unique index on `(provider, file_hash, id)` **Done** — session upsert uses provider-stable session `id` as primary key; `file_hash` records provenance and detects file changes on re-scan.
    - Keep duplicate sessions ignored, not fatal.
+   - Document multi-session-per-file behavior explicitly in tests (`multi-session.jsonl` fixture).
 
-5. Add durable estimation flags.
-   - Add token estimation metadata to normalized messages/sessions.
-   - Persist whether usage was explicit, estimated, or partially estimated.
-   - Surface estimated status in CLI and web.
+5. Add durable estimation flags. **Done** — `token_usage_estimated`, `usage_confidence` on sessions/messages.
 
-6. Preserve pricing fallback status.
-   - Persist whether pricing used an exact model match or provider fallback.
-   - Mark simulated costs as estimated when pricing is incomplete or fallback-based.
-   - Preserve provider-recorded USD cost separately from simulated cost.
-   - Add a user setting to resimulate recorded costs instead of using provider-recorded costs.
+6. Preserve pricing fallback status. **Done** — `resimulateRecordedCosts` wired through scan; `pricing_source` persisted.
 
-7. Implement SQLite full-text search.
-   - Add FTS table/index for stored prompt/content previews.
-   - Keep FTS empty or metadata-safe when privacy mode is `disabled`.
-   - Replace prompt `LIKE` search with FTS where content is available.
+7. ~~Implement SQLite full-text search.~~ **Done.**
+   - FTS5 `messages_fts` with LIKE fallback; purge via `privacy purge-content`.
+   - Keep FTS empty when privacy mode is `disabled`.
 
-8. Stream large files.
-   - Replace whole-file parser reads with line-by-line or streaming parsing where possible.
-   - Keep corrupt record handling warning-based.
+8. Stream large files. **Done (JSONL)** — Claude and Codex JSONL parsers stream line-by-line; incremental skip via `scanned_files` (mtime + hash). JSON array/object Codex and Gemini still load whole file (small typical size).
+
+9. SQLite lock handling. **Done (stub)** — `openProviderDatabase()` in `@agent-usage/db` returns `sqlite-locked` warning; Phase 2 parsers should use it.
+
+10. Surface quality metadata. **Done** — `getStatsSummary` includes `costEstimatedSessions`, `tokenEstimatedSessions`, `sessionsBySupportLevel`, `sessionsByUsageConfidence`; web sessions list/detail and `/api/sessions` expose `usageConfidence`, `costEstimated`, `supportLevel`.
+
+---
 
 ## Phase 2: Provider Expansion
 
-1. Add provider registry.
-   - Centralize provider metadata: id, display name, default paths, env overrides, storage kinds, support level, and parser availability.
-   - Ensure all providers appear in CLI, web settings, provider detection, scan filters, and doctor output.
+**Done** — 19/19 registry providers wired; Crush is detection-only (no usage parsing).
 
-2. OpenCode parser.
-   - Discover `OPENCODE_DATA_DIR`, `~/.local/share/opencode`, `opencode.db`, `opencode-*.db`, legacy `storage/session/**/*.json`, legacy `storage/message/**/*.json`, project-scoped storage, and global storage.
-   - Support SQLite read-only parsing.
-   - Inspect schema before querying `session`, `message`, `part`, and optional `project`.
-   - Parse JSON payloads from `message.data` and `part.data`.
-   - Extract role, model, provider, tokens, content parts, tool parts, and cost when present.
-   - Treat `cost: 0` as not necessarily free; prefer simulated pricing from token counts.
-   - Support legacy JSON session/message joins.
-   - Mark usage unavailable when token fields are absent.
+1. ~~Add provider registry.~~ **Done.**
+2. ~~OpenCode parser.~~ **Done** — SQLite + legacy JSON fixtures.
+3. ~~Qwen Code parser.~~ **Done**
+4. ~~Goose parser.~~ **Done**
+5. ~~Factory Droid parser.~~ **Done**
+6. ~~Amp parser.~~ **Done**
+7. ~~Codebuff parser.~~ **Done**
+8. ~~Kimi CLI parser.~~ **Done**
+9. ~~GitHub Copilot CLI OpenTelemetry parser.~~ **Done**
+10. ~~OpenClaw parser.~~ **Done**
+11. ~~Hermes Agent parser.~~ **Done**
+12. ~~pi-agent parser.~~ **Done**
+13. ~~Kilo parser.~~ **Done**
+14. ~~Aider parser.~~ **Done** — prompt-history-only; respects `estimatePromptOnlySources`.
+15. ~~Cursor CLI and SpecStory parser.~~ **Done**
+16. ~~Crush detection.~~ **Done** — detection/doctor only.
+17. ~~Provider fixtures.~~ **Done** — all providers have valid/missing-fields/corrupt/README (synthetic where noted).
 
-3. Qwen Code parser.
-   - Discover `QWEN_DATA_DIR`, `~/.qwen`, and `~/.qwen/projects/{project}/chats/*.jsonl`.
-   - Stream JSONL line-by-line.
-   - Map `usageMetadata.promptTokenCount`, `candidatesTokenCount`, `thoughtsTokenCount`, `cachedContentTokenCount`, and `totalTokenCount`.
-   - Set cache creation tokens to zero when unavailable.
-   - Price reasoning tokens as output-side usage unless pricing config provides a reasoning rate.
-   - Extract prompt text only when privacy mode allows it.
-
-4. Goose parser.
-   - Discover `GOOSE_PATH_ROOT`, `~/.local/share/goose/sessions/sessions.db`, `~/Library/Application Support/goose/sessions/sessions.db`, and `~/.local/share/Block/goose/sessions/sessions.db`.
-   - Open SQLite read-only and inspect tables/columns.
-   - Parse accumulated or direct input/output/total token columns.
-   - Parse `model_config_json.model_name`.
-   - Infer provider from `provider_name` or model string.
-   - If total tokens exceed input plus output, record the remainder as reasoning/tool tokens with exact confidence.
-   - Simulate costs from configured pricing.
-
-5. Factory Droid parser.
-   - Discover `DROID_SESSIONS_DIR` and `~/.factory/sessions/**/*.settings.json`.
-   - Extract session identity, project/session name, model/provider, input/output, cache creation, cache read, and thinking/reasoning tokens.
-   - Mark `exact-usage` only when token fields are present.
-   - Price reasoning tokens as output-side usage unless a reasoning rate is configured.
-
-6. Amp parser.
-   - Discover `AMP_DATA_DIR` and `~/.local/share/amp/threads/**/*.json`.
-   - Parse thread/session metadata.
-   - Extract usage ledger input/output tokens.
-   - Extract assistant cache creation/read tokens when present.
-   - Store credits in metadata but keep USD cost simulated unless a real USD cost is recorded.
-   - Normalize provider-prefixed model names through pricing aliases.
-
-7. Codebuff parser.
-   - Discover `CODEBUFF_DATA_DIR`, `~/.config/manicode`, `~/.config/manicode-dev`, and `~/.config/manicode-staging`.
-   - Parse `projects/<project>/chats/<chat-id>/chat-messages.json`.
-   - Extract project and chat/session id from path.
-   - Search usage in `metadata.usage`, `metadata.codebuff.usage`, and nested run-state provider usage.
-   - Support input, output, cache creation, cache read, and credits when available.
-   - Preserve metadata and mark usage unavailable when usage metadata is absent.
-
-8. Kimi CLI parser.
-   - Discover `KIMI_DATA_DIR` and `~/.kimi/sessions/<group-id>/<session-id>/wire.jsonl`.
-   - Stream JSONL line-by-line.
-   - Include only `StatusUpdate` messages with non-zero token usage.
-   - Map `token_usage.input_other`, `output`, `input_cache_read`, and `input_cache_creation`.
-   - Default model display to `kimi-for-coding` unless logs provide a model.
-   - Support date-based pricing aliases through config, not hardcoded rules.
-
-9. GitHub Copilot CLI OpenTelemetry parser.
-   - Discover `COPILOT_OTEL_FILE_EXPORTER_PATH` and `~/.copilot/otel/*.jsonl`.
-   - Parse OpenTelemetry JSONL.
-   - Prefer chat spans, then inference logs, then agent-turn logs.
-   - Extract model, input/output, cache read/write, reasoning output, session id, and trace id.
-   - Add `doctor --provider copilot` output explaining `COPILOT_OTEL_ENABLED=true`, `COPILOT_OTEL_EXPORTER_TYPE=file`, and `COPILOT_OTEL_FILE_EXPORTER_PATH`.
-   - Warn when export was not enabled for previous sessions.
-
-10. OpenClaw parser.
-    - Discover `OPENCLAW_DIR`, `~/.openclaw`, `~/.clawdbot`, `~/.moltbot`, and `~/.moldbot`.
-    - Stream `agents/<agentId>/sessions/<uuid>.jsonl`, deleted logs, and reset logs.
-    - Strip `.deleted.<timestamp>` and `.reset.<timestamp>` from session ids.
-    - Track model/provider state from `model_change`, `custom`, and `model-snapshot`.
-    - Use embedded `cost.total` as recorded cost unless resimulation is enabled.
-
-11. Hermes Agent parser.
-    - Discover `HERMES_HOME` and `~/.hermes/state.db`.
-    - Support comma-separated Hermes roots.
-    - Open SQLite read-only and inspect schema.
-    - Read input/output, cache read/write, reasoning tokens, actual cost, estimated cost, and message count.
-    - Prefer actual recorded cost, then estimated recorded cost, then simulated cost.
-
-12. pi-agent parser.
-    - Discover `PI_AGENT_DIR` and `~/.pi/agent/sessions`.
-    - Recursively scan JSONL/JSON session usage files.
-    - Extract session identity from directories, file names, or JSON fields.
-    - Extract input/output, cache creation/read, model, and timestamps.
-    - Preserve metadata and mark usage unavailable when prompt text exists without usage fields.
-
-13. Kilo parser.
-    - Discover `KILO_DATA_DIR` and `~/.local/share/kilo/kilo.db`.
-    - Open SQLite read-only and inspect schema.
-    - Find message/session rows with model, tokens, cache, and cost fields.
-    - Use recorded cost when present; otherwise simulate configured cost.
-    - Report `sqlite-table-missing` or `unknown-schema` instead of crashing.
-
-14. Aider parser.
-    - Support `prompt-history-only` by default.
-    - Discover `.aider.chat.history.md`, `.aider.input.history`, `.aider.llm.history`, `AIDER_CHAT_HISTORY_FILE`, `AIDER_INPUT_HISTORY_FILE`, and `AIDER_LLM_HISTORY_FILE`.
-    - Parse prompts only when privacy mode allows content.
-    - Parse token/cost text markers only when present.
-    - Never invent token usage unless `estimatePromptOnlySources` is enabled.
-    - Mark fallback text estimates as `estimated-from-text`.
-
-15. Cursor CLI and SpecStory parser.
-    - Discover Cursor CLI paths, Cursor desktop `state.vscdb`, and `<project>/.specstory/history/**/*.md`.
-    - Inspect Cursor files/SQLite databases before parsing.
-    - Extract sessions, prompts, assistant messages, and tool calls when present.
-    - Only parse usage/cost when explicit token fields exist.
-    - Parse SpecStory markdown title/date from filename, frontmatter, or headings.
-    - Treat SpecStory as prompt-history-only unless structured token metadata exists.
-
-16. Crush detection.
-    - Discover `.crush.json`, `crush.json`, `~/.config/crush/crush.json`, platform app-data config, and `./.crush/logs/crush.log`.
-    - Implement detection and doctor output only.
-    - Show detected config/log paths and “No stable public token/session schema configured.”
-    - Do not parse token usage until real fixtures confirm schema.
-
-17. Provider fixtures.
-    - Create fixture folders under `packages/parsers/fixtures/` for every new provider.
-    - Each provider must include minimal valid sample, missing-fields sample, corrupt-file sample, and README with expected normalized output.
-    - OpenCode must include both `legacy-json` and `sqlite` fixtures.
-    - Copilot fixtures must cover OpenTelemetry JSONL.
-    - Crush fixtures must cover detection only.
+---
 
 ## Phase 3: CLI Contract Completion
 
-1. Add `--json` support to every command.
-   - Cover `pricing import`, `pricing export`, `privacy`, `watch`, `dashboard`, `doctor`, and `seed`.
+**Done.**
 
-2. Complete stats behavior.
-   - Implement true daily, monthly, and yearly queries.
-   - Support `--from` and `--to` consistently.
-   - Include totals, most expensive model, most expensive day, and top projects by cost.
+1. Add `--json` support to every command. **Done**
+   - All commands including `pricing import/export`, `privacy status/set`, `watch`, `seed`, and `dashboard`.
+   - `dashboard --json` emits `{ url, port, pid }`.
 
-3. Improve `dashboard`.
-   - Start or open the local web app instead of only printing instructions.
-   - Keep behavior local-only.
+2. Complete stats behavior. **Done**
+   - Daily, weekly, monthly, yearly rollups with `--from`/`--to`.
+   - `--week` / `--granularity week` for weekly stats and export.
+   - Summary includes most expensive model/day and top projects.
 
-4. Harden privacy commands.
-   - Ensure `privacy purge-content` clears full text, previews, tool previews, and raw records.
-   - Report how many rows were purged.
+3. Improve `dashboard`. **Done**
+   - Prefers built Next.js app in `node_modules/@agent-usage/web` or `apps/web/.next`.
+   - Falls back to monorepo `pnpm dev`.
+   - Binds to `127.0.0.1` by default.
 
-5. Document `sync`.
-   - Add README coverage for installed-agent detection and provider selection.
-   - Ensure sync animation behaves cleanly in non-TTY and JSON modes.
+4. Harden privacy commands. **Done**
+   - `privacy purge-content` clears message content, FTS, and session metadata.
+   - Reports purge counts in JSON and human output.
 
-6. Add provider commands.
-   - `agent-usage providers`
-   - `agent-usage providers detect`
-   - `agent-usage scan --provider <provider>` for every provider id.
-   - `agent-usage doctor --provider copilot`
-   - `agent-usage doctor --provider opencode`
+5. Document `sync` and `watch`. **Done**
+   - README covers detection, non-TTY/JSON modes, and watch debounce.
 
-7. Add schema inspection.
-   - Implement `agent-usage inspect-schema --provider opencode`.
-   - Implement `agent-usage inspect-schema --provider goose`.
-   - Implement `agent-usage inspect-schema --provider kilo`.
-   - Implement `agent-usage inspect-schema --provider hermes`.
-   - Open source SQLite DBs read-only.
-   - List tables and columns.
-   - Detect likely session/message/usage tables.
-   - Output JSON with guessed mappings.
-   - Never modify source DBs.
+6. ~~Add provider commands.~~ **Done**
+   - `providers`, `providers detect`, `scan --provider`, `doctor --provider`, `inspect-schema`.
+
+7. ~~Add schema inspection.~~ **Done** for OpenCode, Goose, Kilo, Hermes.
+
+8. Export and scan history. **Done**
+   - `stats export --format csv|json`, `sessions export`, `scan history`, `warnings` (all support `--json`).
+
+---
 
 ## Phase 4: Web App Completion
+
+**Done.**
+
+1. **Dashboard** — time range (day/week/month/year/custom), group-by, metric selector, cost-by-model, real recent/expensive sessions, provider comparison, confidence filter, metadata-only warning. `/api/stats` supports week granularity and filters.
+2. **Prompt viewer** — paginated default list, filters, session links, token/cost, view privacy toggle; prompt-history-only messaging.
+3. **Sessions** — detail timeline, tool calls section, parser warnings; sort by provider/model.
+4. **Pricing** — custom models, profile selector, clone profile, editable cached/reasoning rates, last updated.
+5. **Settings** — provider toggles/paths, raw retention, estimation fallback, currency, rescan/rebuild rollups.
+6. **Providers** — warnings, last scan, exact vs metadata-only counts.
+7. **Web API & UX** — `apps/web/tests/api-queries.test.ts`; async scan + polling; bind to `127.0.0.1`.
+
+**Deferred:** HTTP-level Next.js route integration tests; shadcn migration (Phase 7).
+
+<details>
+<summary>Original Phase 4 checklist</summary>
 
 1. Dashboard.
    - Add time range switcher: day, week, month, year, custom.
@@ -248,7 +203,7 @@ This project is currently a usable prototype, not acceptance-ready. The main gap
    - Add view privacy toggle: full, preview, hidden stats-only.
 
 3. Sessions page.
-   - Add session detail route.
+   - Add session detail route (`/sessions/[id]`) and `GET /api/sessions/[id]`.
    - Show conversation timeline.
    - Show tool calls separately.
    - Show parser warnings.
@@ -256,7 +211,7 @@ This project is currently a usable prototype, not acceptance-ready. The main gap
 
 4. Pricing page.
    - Add custom model creation.
-   - Add profile selector.
+   - Add profile selector (`PricingProfile` including `subscription-equivalent`).
    - Add clone pricing profile.
    - Add editable cached input and reasoning prices.
    - Show last updated date.
@@ -265,7 +220,7 @@ This project is currently a usable prototype, not acceptance-ready. The main gap
    - Add provider paths.
    - Add enable/disable provider toggles.
    - Add raw retention setting.
-   - Add token estimation fallback setting.
+   - Add token estimation fallback setting (`estimatePromptOnlySources`).
    - Add currency display preference.
    - Add rescan and rebuild indexes actions.
 
@@ -289,28 +244,39 @@ This project is currently a usable prototype, not acceptance-ready. The main gap
    - For prompt-history-only providers with privacy disabled, show timestamp, provider, project, session, and content hidden.
    - When token data is unavailable, show “No reliable token usage found for this source.”
 
+9. Web API and UX. *(new)*
+   - Add web API contract tests (mirror CLI JSON tests).
+   - Show scan progress during long scans.
+   - Bind dev/prod server to localhost.
+
+</details>
+
+---
+
 ## Phase 5: Pricing And Aliases
 
-1. Keep bundled pricing snapshot local.
-   - Do not fetch pricing at runtime unless the user explicitly enables it.
-   - Keep bundled pricing JSON user-editable.
+**Done.**
 
-2. Add model aliases.
-   - OpenAI/Codex aliases.
-   - Anthropic aliases.
-   - Gemini, Google, Vertex, and OpenRouter Gemini aliases.
-   - Qwen aliases.
-   - Moonshot/Kimi aliases.
-   - Provider-prefixed aliases such as `anthropic/claude...`, `openrouter/...`, and `google/...`.
+1. Keep bundled pricing snapshot local. **Done**
+   - No runtime fetch of pricing; bundled defaults + SQLite DB only.
+   - `pricing.example.json` and bundled `DEFAULT_PRICING_MODELS` remain user-editable; CLI import accepts array or `{ "models": [...] }`.
 
-3. Support provider-specific pricing behavior.
-   - Reasoning tokens default to output-side pricing unless a custom reasoning rate exists.
-   - Recorded provider cost remains separate from simulated cost.
-   - Unknown pricing falls back to provider fallback model and marks cost estimated.
+2. Add model aliases. **Done**
+   - OpenAI/Codex, Anthropic, Gemini/Google/Vertex/OpenRouter, Qwen, Moonshot/Kimi aliases in `packages/pricing/src/aliases.ts`.
+   - Provider-prefixed names (`anthropic/...`, `openrouter/...`, `google/...`, Vertex `models/...`).
+   - Config overrides via `modelAliases` in `agent-usage.config.json`; `lookupPricing` resolves aliases before fallback.
 
-## Phase 6: Privacy Completion
+3. Support provider-specific pricing behavior. **Done**
+   - Reasoning tokens use output-side pricing by default (not marked estimated).
+   - Recorded vs simulated cost separation unchanged from Phase 1.
+   - Unknown models fall back to provider default with `isEstimated: true`.
+   - `subscription-equivalent` profile documented in engine comments + README.
 
-1. Enforce privacy defaults across all new providers.
+---
+
+## Phase 6: Privacy Completion **Done**
+
+1. Enforce privacy defaults across all new providers. **Done**
    - Store token/cost metadata by default.
    - Do not store prompt text by default.
    - Do not store assistant text by default.
@@ -318,23 +284,25 @@ This project is currently a usable prototype, not acceptance-ready. The main gap
    - Only keep prompt content in memory during parsing when required for enabled estimation.
    - Respect purge command for every parser and storage path.
 
-2. Add prompt-only estimation setting.
+2. Add prompt-only estimation setting. **Done**
    - Add `estimatePromptOnlySources`.
    - Keep it disabled by default.
    - Use it only for sources such as Aider, Cursor, and SpecStory when no structured usage exists.
 
-## Phase 7: shadcn/ui And UI Package
+---
 
-1. Initialize shadcn/ui properly.
+## Phase 7: shadcn/ui And UI Package — **Done**
+
+1. Initialize shadcn/ui properly. **Done**
    - Add `components.json`.
    - Add required shadcn dependencies and base components.
    - Use shadcn primitives where appropriate.
 
-2. Consolidate chart usage.
+2. Consolidate chart usage. **Done**
    - Use `packages/ui` chart primitives from the web app instead of duplicate local chart implementations.
    - Verify all charts support dark mode, responsive sizing, empty states, keyboard focus, tooltips, compact numbers, and currency formatting.
 
-3. Complete required chart primitives.
+3. Complete required chart primitives. **Done**
    - `UsageLineChart`
    - `UsageBarChart`
    - `CostStackedBarChart`
@@ -342,63 +310,85 @@ This project is currently a usable prototype, not acceptance-ready. The main gap
    - `CalendarHeatmap`
    - `ModelCostRanking`
 
-## Phase 8: Desktop Packaging
+---
 
-1. Add Tauri app.
-   - Create `apps/desktop`.
-   - Wire `pnpm desktop:dev`.
-   - Wire `pnpm desktop:build`.
-   - Use OS app data directory for SQLite and settings.
-   - Do not expose a public network server.
+## Phase 8: Distribution and Desktop Packaging
+
+### Phase 8.1: CLI and npm Distribution *(done)*
+
+1. ~~Publish `@agent-usage/cli` for global install (`npm install -g`, `pnpm add -g`, `npx agent-usage`).~~ **Done** — `apps/cli/package.json` has `bin`, `files`, `exports`, `publishConfig`; bundled `web/` via `scripts/bundle-web.mjs`.
+2. ~~Bundle or ship built web assets so `dashboard` works outside a git checkout.~~ **Done** — root `pnpm build` builds web then CLI; `resolveWebAppTarget()` prefers `apps/cli/web`.
+3. ~~Add Homebrew formula (macOS) as optional install path.~~ **Done** — `Formula/agent-usage.rb` + `docs/HOMEBREW.md` (template only, no tap).
+4. ~~Document Windows/Linux path verification milestones (macOS first).~~ **Done** — README platform notes.
+
+### Phase 8.2: Tauri Desktop App *(scaffolded)*
+
+1. ~~Add Tauri app.~~ **Scaffolded**
+   - ~~Create `apps/desktop`.~~ **Done**
+   - ~~Wire `pnpm desktop:dev` and `pnpm desktop:build`.~~ **Done** — root `package.json`
+   - ~~Use OS app data directory for SQLite and settings.~~ **Done** — `AGENT_USAGE_DB_PATH` via Tauri `app_data_dir`
+   - ~~Do not expose a public network server.~~ **Done** — binds `127.0.0.1` only
 
 2. Keep desktop local-first.
-   - Verify offline operation.
-   - Verify local reads for Codex, Claude, and Gemini session files on macOS first.
-   - Leave Windows/Linux path support behind provider-path abstraction.
+   - Offline operation: dashboard served locally; no network required.
+   - macOS path verification: same provider registry as CLI (Windows/Linux via path abstraction — manual QA pending).
+   - Full release bundling (sidecar CLI + icons): follow `apps/desktop/README.md`; CI desktop job optional.
+
+---
 
 ## Phase 9: Tests
 
-1. Add integration test for scan -> DB -> dashboard query.
+1. Add integration test for scan -> DB -> dashboard query (include temp DB fixture setup).
 2. Add CLI JSON contract tests for all commands.
-3. Add privacy mode tests.
+3. Add web API contract tests.
+4. Add privacy mode tests.
    - Fresh install stores no prompt content.
    - Preview/full/raw only affect future scans unless rescanned.
    - Purge removes stored prompt/response/raw content.
-4. Add parser robustness tests.
+5. Add parser robustness tests.
    - Corrupt files.
    - Unknown records.
    - Missing usage fields.
    - Duplicate sessions.
    - Large JSONL files.
-5. Add provider parser tests.
-   - Every new provider has fixture-backed tests.
+6. Add provider parser tests.
+   - **Every** provider (including Claude, Codex, Gemini) has fixture-backed tests per Phase 2.17.
    - Every parser handles missing/corrupt files without crashing.
    - SQLite provider tests assert source DBs are opened read-only.
    - OpenCode tests cover SQLite and legacy JSON.
    - Copilot tests cover OpenTelemetry enabled and missing-export states.
    - Crush tests cover detected-only behavior.
    - Aider, Cursor, and SpecStory tests assert token usage is not invented unless estimation is explicitly enabled.
+7. Add CLI command tests under `apps/cli/tests`.
+
+---
 
 ## Phase 10: Documentation
 
 1. Complete README.
-   - Install instructions.
+   - Install instructions (git checkout, global CLI, Homebrew when available).
    - Full CLI examples.
-   - `sync` command behavior.
+   - `sync` and `watch` command behavior.
    - Web app usage.
    - Desktop roadmap and commands.
    - Screenshots placeholder section.
    - Security and privacy model.
    - How to add a new provider.
+   - Explicit non-goals section (link to above).
 
-2. Update examples.
+2. Update examples and contributor docs.
    - Verify `pricing.example.json`.
-   - Verify `agent-usage.config.example.json`.
+   - Verify `agent-usage.config.example.json` (all 19 providers + new toggles).
    - Add notes about simulated API-equivalent costs.
    - Add provider matrix with support level and usage confidence notes.
    - Document Copilot OpenTelemetry setup.
    - Document schema inspection commands.
    - Document prompt-history-only providers and estimation behavior.
+   - Sync `AGENTS.md` and `CLAUDE.md` with final architecture.
+   - Add contributing guide for parser fixtures and schema changes.
+   - Fix placeholder GitHub URL in web layout footer.
+
+---
 
 ## Done Criteria
 
@@ -411,14 +401,18 @@ The implementation is acceptance-ready when:
 - `pnpm build` builds all packages, including `packages/ui`.
 - `pnpm dev` starts the web app.
 - `pnpm cli scan` scans supported local session folders.
+- Zod schemas and example config match the 19-provider registry.
+- DB schema version is documented; upgrade path tested from prior `stats.db`.
 - Every supported provider appears in CLI and web settings.
-- Every parser has fixtures.
+- Every parser has fixtures (including Claude, Codex, Gemini per Phase 2.17).
 - Every parser handles missing/corrupt files without crashing.
 - SQLite sources are opened read-only.
 - CLI stats work for day, month, year, and custom ranges.
 - CLI `--json` works for every command.
 - `agent-usage providers` and `agent-usage providers detect` work.
 - `agent-usage inspect-schema` works for OpenCode, Goose, Kilo, and Hermes.
+- `dashboard` works from installed/built artifact, not only git checkout.
+- Scan history and parser warnings visible in CLI/web.
 - Web dashboard shows token and cost charts.
 - Web dashboard works when most sources are metadata-only.
 - Web dashboard can filter by usage confidence.
@@ -435,4 +429,5 @@ The implementation is acceptance-ready when:
 - Copilot doctor explains OpenTelemetry setup.
 - Crush is detected but not parsed for usage.
 - Aider and Cursor never invent token usage unless estimation is explicitly enabled.
-- README explains how to add new providers.
+- README explains how to add new providers and lists explicit non-goals.
+- `desktop:dev` works or remains absent until Phase 8.2 ships.

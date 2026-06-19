@@ -4,12 +4,12 @@ import path from 'path';
 import type {
   ProviderParser,
   ParseResult,
-  ParserOptions,
+  ParseOptions,
   NormalizedSession,
   NormalizedMessage,
-  TokenTotals,
 } from '@agent-usage/shared';
-import { generateId, truncateText, estimateTokensFromText, emptyTokenTotals } from '@agent-usage/shared';
+import { generateId, truncateText, estimateTokensFromText, totalsFromMessages } from '@agent-usage/shared';
+import { shouldStoreRaw } from './parser-helpers.js';
 
 type CodexMessage = {
   role?: string;
@@ -93,25 +93,15 @@ export const codexParser: ProviderParser = {
     }
   },
 
-  async parse(filePath: string, options?: ParserOptions): Promise<ParseResult> {
+  async parse(filePath: string, options?: ParseOptions): Promise<ParseResult> {
     const sessions = new Map<string, NormalizedSession>();
     const warnings: ParseResult['warnings'] = [];
 
     try {
-      const content = fs.readFileSync(filePath, 'utf-8');
+      const format = detectCodexFormat(filePath);
 
-      // Try to determine format
-      const trimmed = content.trim();
-      if (trimmed.startsWith('[')) {
-        // JSON array format
-        const data = JSON.parse(content);
-        const result = parseCodexJson(data, filePath, options);
-        for (const session of result.sessions) {
-          sessions.set(session.id, session);
-        }
-        warnings.push(...result.warnings);
-      } else if (trimmed.startsWith('{') && trimmed.includes('"messages"')) {
-        // JSON object with messages array
+      if (format === 'json') {
+        const content = fs.readFileSync(filePath, 'utf-8');
         const data = JSON.parse(content);
         const result = parseCodexJson(data, filePath, options);
         for (const session of result.sessions) {
@@ -119,7 +109,6 @@ export const codexParser: ProviderParser = {
         }
         warnings.push(...result.warnings);
       } else {
-        // JSONL format (each line is a JSON object)
         const result = await parseCodexJsonl(filePath, options);
         for (const session of result.sessions) {
           sessions.set(session.id, session);
@@ -131,6 +120,7 @@ export const codexParser: ProviderParser = {
         file: filePath,
         message: `Failed to parse Codex file: ${e instanceof Error ? e.message : String(e)}`,
         severity: 'error',
+        code: 'json-parse-error',
       });
     }
 
@@ -138,10 +128,24 @@ export const codexParser: ProviderParser = {
   },
 };
 
+function detectCodexFormat(filePath: string): 'json' | 'jsonl' {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(4096);
+    const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+    const sample = buf.slice(0, bytesRead).toString('utf-8').trim();
+    if (sample.startsWith('[')) return 'json';
+    if (sample.startsWith('{') && sample.includes('"messages"')) return 'json';
+    return 'jsonl';
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function parseCodexJson(
   data: unknown,
   filePath: string,
-  options?: ParserOptions,
+  options?: ParseOptions,
 ): ParseResult {
   const sessions: NormalizedSession[] = [];
   const warnings: ParseResult['warnings'] = [];
@@ -171,7 +175,7 @@ function parseCodexJson(
     normalizedMessages.push(normalized);
   }
 
-  const totals = computeSessionTotals(normalizedMessages);
+  const totals = totalsFromMessages(normalizedMessages);
   const firstMsg = normalizedMessages[0];
   const lastMsg = normalizedMessages[normalizedMessages.length - 1];
 
@@ -191,7 +195,7 @@ function parseCodexJson(
 
 async function parseCodexJsonl(
   filePath: string,
-  options?: ParserOptions,
+  options?: ParseOptions,
 ): Promise<ParseResult> {
   const sessions = new Map<string, NormalizedSession>();
   const warnings: ParseResult['warnings'] = [];
@@ -225,12 +229,13 @@ async function parseCodexJsonl(
         line: lineNum,
         message: `Failed to parse line: ${e instanceof Error ? e.message : String(e)}`,
         severity: 'warning',
+        code: 'json-parse-error',
       });
     }
   }
 
   for (const [sessionId, messages] of messagesBySession) {
-    const totals = computeSessionTotals(messages);
+    const totals = totalsFromMessages(messages);
     const firstMsg = messages[0];
     const lastMsg = messages[messages.length - 1];
 
@@ -252,7 +257,7 @@ async function parseCodexJsonl(
 function normalizeCodexMessage(
   msg: CodexMessage,
   sessionId: string,
-  options?: ParserOptions,
+  options?: ParseOptions,
 ): NormalizedMessage {
   const role = mapCodexRole(msg.role || msg.type || 'unknown');
   const contentText = msg.content || '';
@@ -279,8 +284,13 @@ function normalizeCodexMessage(
     inputTokens: estInput,
     outputTokens: estOutput,
     toolName: msg.name,
-    toolInputPreview: msg.arguments ? truncateText(msg.arguments, 200) : undefined,
-    raw: options?.privacyMode === 'raw' ? msg : undefined,
+    toolInputPreview:
+      options?.privacyMode === 'disabled'
+        ? undefined
+        : msg.arguments
+          ? truncateText(msg.arguments, 200)
+          : undefined,
+    raw: shouldStoreRaw(options) ? msg : undefined,
   };
 }
 
@@ -300,17 +310,4 @@ function mapCodexRole(role: string): NormalizedMessage['role'] {
     default:
       return 'unknown';
   }
-}
-
-function computeSessionTotals(messages: NormalizedMessage[]): TokenTotals {
-  const totals = emptyTokenTotals();
-  for (const msg of messages) {
-    totals.inputTokens += msg.inputTokens || 0;
-    totals.outputTokens += msg.outputTokens || 0;
-    totals.cachedInputTokens += msg.cachedInputTokens || 0;
-    totals.reasoningTokens += msg.reasoningTokens || 0;
-  }
-  totals.totalTokens =
-    totals.inputTokens + totals.outputTokens + totals.cachedInputTokens + totals.reasoningTokens;
-  return totals;
 }

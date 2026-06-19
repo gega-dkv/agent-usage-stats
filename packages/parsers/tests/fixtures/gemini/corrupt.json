@@ -1,0 +1,15 @@
+{
+  "chatId": "gemini-corrupt",
+  "messages": [
+    {
+      "role": "user",
+      "parts": [{"text": "Valid message"}],
+      "usageMetadata": {
+        "promptTokenCount": 100,
+        "candidatesTokenCount": 0,
+        "totalTokenCount": 100
+      }
+    }
+  ],
+  "trailingGarbage": true,
+  "this breaks strict parsers": 

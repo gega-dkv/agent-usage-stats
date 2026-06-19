@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatCurrency } from '@/lib/format';
+import { formatCurrency, formatDateTime } from '@/lib/format';
 
 type Model = {
   id: number;
@@ -15,21 +15,41 @@ type Model = {
   reasoningPerMillion: number | null;
   profile: string;
   notes: string | null;
+  updatedAt?: string;
 };
+
+const PROFILES = [
+  'api-standard',
+  'api-batch',
+  'subscription-equivalent',
+  'custom',
+];
 
 export default function PricingPage() {
   const [models, setModels] = useState<Model[]>([]);
+  const [profiles, setProfiles] = useState<string[]>([]);
+  const [profile, setProfile] = useState('api-standard');
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Model>>({});
   const [showAdd, setShowAdd] = useState(false);
+  const [newModel, setNewModel] = useState({
+    provider: 'openai',
+    model: '',
+    inputPerMillion: 0,
+    outputPerMillion: 0,
+  });
+  const [cloneTarget, setCloneTarget] = useState('');
 
   const fetchModels = () => {
     setLoading(true);
-    fetch('/api/pricing')
+    fetch(`/api/pricing?profile=${encodeURIComponent(profile)}`)
       .then((r) => r.json())
       .then((d) => {
         setModels(d.models || []);
+        setProfiles(d.profiles?.length ? d.profiles : PROFILES);
+        setLastUpdated(d.lastUpdated ?? null);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -37,7 +57,7 @@ export default function PricingPage() {
 
   useEffect(() => {
     fetchModels();
-  }, []);
+  }, [profile]);
 
   const handleEdit = (m: Model) => {
     setEditingId(m.id);
@@ -46,48 +66,50 @@ export default function PricingPage() {
 
   const handleSave = async () => {
     if (!editingId) return;
-    try {
-      await fetch('/api/pricing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: editForm.provider,
-          model: editForm.model,
-          inputPerMillion: editForm.inputPerMillion,
-          outputPerMillion: editForm.outputPerMillion,
-          cachedInputPerMillion: editForm.cachedInputPerMillion,
-          cacheWritePerMillion: editForm.cacheWritePerMillion,
-          reasoningPerMillion: editForm.reasoningPerMillion,
-          notes: editForm.notes,
-        }),
-      });
-      setEditingId(null);
-      setEditForm({});
-      fetchModels();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleExport = () => {
-    const json = JSON.stringify(models, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'pricing.json';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImport = async (file: File) => {
-    const text = await file.text();
-    const data = JSON.parse(text);
     await fetch('/api/pricing', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        provider: editForm.provider,
+        model: editForm.model,
+        inputPerMillion: editForm.inputPerMillion,
+        outputPerMillion: editForm.outputPerMillion,
+        cachedInputPerMillion: editForm.cachedInputPerMillion,
+        cacheWritePerMillion: editForm.cacheWritePerMillion,
+        reasoningPerMillion: editForm.reasoningPerMillion,
+        profile,
+        notes: editForm.notes,
+      }),
     });
+    setEditingId(null);
+    setEditForm({});
+    fetchModels();
+  };
+
+  const handleAdd = async () => {
+    if (!newModel.model) return;
+    await fetch('/api/pricing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...newModel, profile }),
+    });
+    setShowAdd(false);
+    setNewModel({ provider: 'openai', model: '', inputPerMillion: 0, outputPerMillion: 0 });
+    fetchModels();
+  };
+
+  const handleClone = async () => {
+    if (!cloneTarget) return;
+    await fetch('/api/pricing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'clone',
+        sourceProfile: profile,
+        targetProfile: cloneTarget,
+      }),
+    });
+    setCloneTarget('');
     fetchModels();
   };
 
@@ -99,52 +121,96 @@ export default function PricingPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             Edit model pricing to match your actual usage tier
           </p>
+          {lastUpdated && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Last updated: {formatDateTime(lastUpdated)}
+            </p>
+          )}
         </div>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition hover:bg-accent">
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
-            </svg>
-            Import
-            <input
-              type="file"
-              accept=".json"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleImport(f);
-              }}
-            />
-          </label>
-          <button
-            onClick={handleExport}
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition hover:bg-accent"
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={profile}
+            onChange={(e) => setProfile(e.target.value)}
+            className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
           >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-            </svg>
-            Export
+            {[...new Set([...PROFILES, ...profiles])].map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-accent"
+          >
+            Add model
           </button>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/20">
-        <div className="flex items-start gap-3">
-          <svg className="h-5 w-5 flex-shrink-0 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
-          <div>
-            <h4 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-              Costs are estimates
-            </h4>
-            <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-              Costs shown are estimates based on configured API-equivalent pricing. Actual costs may vary based on your subscription, usage tier, or negotiated rates.
-            </p>
-          </div>
+      <div className="flex flex-wrap items-end gap-2 rounded-2xl border border-border bg-card p-4">
+        <div>
+          <label className="text-xs text-muted-foreground">Clone profile to</label>
+          <input
+            value={cloneTarget}
+            onChange={(e) => setCloneTarget(e.target.value)}
+            placeholder="new-profile-name"
+            className="mt-1 block rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+          />
         </div>
+        <button
+          onClick={handleClone}
+          disabled={!cloneTarget}
+          className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
+        >
+          Clone current profile
+        </button>
       </div>
 
-      {/* Table */}
+      {showAdd && (
+        <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+          <h3 className="font-semibold">Add custom model</h3>
+          <div className="flex flex-wrap gap-2">
+            <input
+              placeholder="Provider (openai, anthropic…)"
+              value={newModel.provider}
+              onChange={(e) => setNewModel({ ...newModel, provider: e.target.value })}
+              className="rounded-md border border-input px-2 py-1.5 text-sm"
+            />
+            <input
+              placeholder="Model name"
+              value={newModel.model}
+              onChange={(e) => setNewModel({ ...newModel, model: e.target.value })}
+              className="rounded-md border border-input px-2 py-1.5 text-sm"
+            />
+            <input
+              type="number"
+              placeholder="Input/M"
+              value={newModel.inputPerMillion}
+              onChange={(e) =>
+                setNewModel({ ...newModel, inputPerMillion: parseFloat(e.target.value) })
+              }
+              className="w-24 rounded-md border border-input px-2 py-1.5 text-sm"
+            />
+            <input
+              type="number"
+              placeholder="Output/M"
+              value={newModel.outputPerMillion}
+              onChange={(e) =>
+                setNewModel({ ...newModel, outputPerMillion: parseFloat(e.target.value) })
+              }
+              className="w-24 rounded-md border border-input px-2 py-1.5 text-sm"
+            />
+            <button onClick={handleAdd} className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground">
+              Save
+            </button>
+            <button onClick={() => setShowAdd(false)} className="rounded-md border px-3 py-1.5 text-sm">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -169,23 +235,14 @@ export default function PricingPage() {
               ) : models.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-sm text-muted-foreground">
-                    No pricing models
+                    No pricing models for this profile
                   </td>
                 </tr>
               ) : (
                 models.map((m) => (
-                  <tr key={m.id} className="border-b border-border text-sm last:border-0 transition hover:bg-muted/30">
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {m.provider}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-medium">
-                      <div>{m.model}</div>
-                      {m.notes && (
-                        <div className="text-xs text-muted-foreground">{m.notes}</div>
-                      )}
-                    </td>
+                  <tr key={m.id} className="border-b border-border text-sm last:border-0 hover:bg-muted/30">
+                    <td className="px-4 py-3 font-mono text-xs">{m.provider}</td>
+                    <td className="px-4 py-3 font-medium">{m.model}</td>
                     <td className="px-4 py-3 text-right font-mono">
                       {editingId === m.id ? (
                         <input
@@ -195,7 +252,7 @@ export default function PricingPage() {
                           onChange={(e) =>
                             setEditForm({ ...editForm, inputPerMillion: parseFloat(e.target.value) })
                           }
-                          className="w-20 rounded border border-input bg-background px-2 py-1 text-right text-xs"
+                          className="w-20 rounded border px-2 py-1 text-right text-xs"
                         />
                       ) : (
                         formatCurrency(m.inputPerMillion)
@@ -210,25 +267,56 @@ export default function PricingPage() {
                           onChange={(e) =>
                             setEditForm({ ...editForm, outputPerMillion: parseFloat(e.target.value) })
                           }
-                          className="w-20 rounded border border-input bg-background px-2 py-1 text-right text-xs"
+                          className="w-20 rounded border px-2 py-1 text-right text-xs"
                         />
                       ) : (
                         formatCurrency(m.outputPerMillion)
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-muted-foreground">
-                      {m.cachedInputPerMillion != null ? formatCurrency(m.cachedInputPerMillion) : '—'}
+                    <td className="px-4 py-3 text-right font-mono">
+                      {editingId === m.id ? (
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editForm.cachedInputPerMillion ?? ''}
+                          onChange={(e) =>
+                            setEditForm({
+                              ...editForm,
+                              cachedInputPerMillion: parseFloat(e.target.value) || undefined,
+                            })
+                          }
+                          className="w-20 rounded border px-2 py-1 text-right text-xs"
+                        />
+                      ) : m.cachedInputPerMillion != null ? (
+                        formatCurrency(m.cachedInputPerMillion)
+                      ) : (
+                        '—'
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-muted-foreground">
-                      {m.reasoningPerMillion != null ? formatCurrency(m.reasoningPerMillion) : '—'}
+                    <td className="px-4 py-3 text-right font-mono">
+                      {editingId === m.id ? (
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editForm.reasoningPerMillion ?? ''}
+                          onChange={(e) =>
+                            setEditForm({
+                              ...editForm,
+                              reasoningPerMillion: parseFloat(e.target.value) || undefined,
+                            })
+                          }
+                          className="w-20 rounded border px-2 py-1 text-right text-xs"
+                        />
+                      ) : m.reasoningPerMillion != null ? (
+                        formatCurrency(m.reasoningPerMillion)
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       {editingId === m.id ? (
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={handleSave}
-                            className="rounded bg-emerald-600 px-2 py-1 text-xs text-white hover:bg-emerald-700"
-                          >
+                        <div className="flex justify-end gap-1">
+                          <button onClick={handleSave} className="rounded bg-emerald-600 px-2 py-1 text-xs text-white">
                             Save
                           </button>
                           <button
@@ -236,16 +324,13 @@ export default function PricingPage() {
                               setEditingId(null);
                               setEditForm({});
                             }}
-                            className="rounded border border-input bg-background px-2 py-1 text-xs hover:bg-accent"
+                            className="rounded border px-2 py-1 text-xs"
                           >
                             Cancel
                           </button>
                         </div>
                       ) : (
-                        <button
-                          onClick={() => handleEdit(m)}
-                          className="text-xs font-medium text-primary hover:underline"
-                        >
+                        <button onClick={() => handleEdit(m)} className="text-xs text-primary hover:underline">
                           Edit
                         </button>
                       )}

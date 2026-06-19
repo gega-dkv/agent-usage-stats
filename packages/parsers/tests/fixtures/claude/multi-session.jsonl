@@ -1,0 +1,4 @@
+{"uuid":"a1","type":"message","role":"human","content":"Session A prompt","model":"claude-sonnet-4-20250514","usage":{"input_tokens":100,"output_tokens":0},"timestamp":"2026-06-18T10:00:00Z","session_id":"session-a"}
+{"uuid":"a2","type":"message","role":"assistant","content":"Session A reply","model":"claude-sonnet-4-20250514","usage":{"input_tokens":0,"output_tokens":50},"timestamp":"2026-06-18T10:01:00Z","session_id":"session-a"}
+{"uuid":"b1","type":"message","role":"human","content":"Session B prompt","model":"claude-sonnet-4-20250514","usage":{"input_tokens":200,"output_tokens":0},"timestamp":"2026-06-18T11:00:00Z","session_id":"session-b"}
+{"uuid":"b2","type":"message","role":"assistant","content":"Session B reply","model":"claude-sonnet-4-20250514","usage":{"input_tokens":0,"output_tokens":75},"timestamp":"2026-06-18T11:01:00Z","session_id":"session-b"}

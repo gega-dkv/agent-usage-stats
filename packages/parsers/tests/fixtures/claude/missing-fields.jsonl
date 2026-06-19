@@ -1,0 +1,2 @@
+{"uuid":"msg-m1","type":"message","role":"human","content":"Message without usage metadata","session_id":"session-missing"}
+{"uuid":"msg-m2","type":"message","role":"assistant","content":[{"type":"text","text":"Reply also without usage block"}],"session_id":"session-missing"}

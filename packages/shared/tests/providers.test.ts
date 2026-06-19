@@ -10,11 +10,14 @@ import {
 } from '../src/index.js';
 
 describe('Provider registry', () => {
-  it('registers the three first-class providers with parsers', () => {
+  it('registers all providers with parsers', () => {
     const withParser = providersWithParser();
     expect(withParser).toContain('claude');
     expect(withParser).toContain('codex');
     expect(withParser).toContain('gemini');
+    expect(withParser).toContain('qwen');
+    expect(withParser).toContain('opencode');
+    expect(withParser.length).toBeGreaterThanOrEqual(19);
   });
 
   it('exposes every registry entry through listProviders', () => {
@@ -29,8 +32,11 @@ describe('Provider registry', () => {
       expect(def.label).toBeTruthy();
       expect(def.pricingProvider).toBeTruthy();
       expect(Array.isArray(def.defaultPaths)).toBe(true);
-      // detect-only / unsupported providers must not claim to have a parser.
-      if (def.supportLevel === 'detected-only' || def.supportLevel === 'unsupported') {
+      // detect-only providers may have a detection-only parser (e.g. Crush).
+      if (def.supportLevel === 'detected-only' && def.id !== 'crush') {
+        expect(def.hasParser).toBe(false);
+      }
+      if (def.supportLevel === 'unsupported') {
         expect(def.hasParser).toBe(false);
       }
     }

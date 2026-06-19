@@ -1,25 +1,43 @@
 import fs from 'fs';
 import crypto from 'crypto';
-import type { Provider, AppConfig, ParserWarning, NormalizedSession } from '@agent-usage/shared';
-import { providerToPricingProvider } from '@agent-usage/shared';
+import type {
+  Provider,
+  AppConfig,
+  ParserWarning,
+  NormalizedSession,
+  PricingSource,
+  PrivacyMode,
+} from '@agent-usage/shared';
+import {
+  providerToPricingProvider,
+  listProviders,
+  safeParseAppConfig,
+  PROVIDER_REGISTRY,
+  normalizeTokenTotals,
+} from '@agent-usage/shared';
 import type { ModelPricing, PricingProfile, PricingProvider } from '@agent-usage/shared';
-import { discoverSessionFiles, getParserForFile } from '@agent-usage/parsers';
+import { discoverSessionFiles, getParserForFile, sanitizeMessageForPrivacy } from '@agent-usage/parsers';
 import type { AppDatabase } from '@agent-usage/db';
 import {
   getPricingModels,
   getSetting,
   insertParserWarning,
   insertScanRun,
+  isFileUnchanged,
+  markFileScanned,
   refreshUsageRollups,
+  updateScanRunProgress,
+  updateSessionCosts,
   upsertMessages,
   upsertPricingModel,
   upsertSession,
 } from '@agent-usage/db';
 import { calculateCost, lookupPricing, getDefaultPricingModels } from '@agent-usage/pricing';
-import type { PrivacyMode } from '@agent-usage/shared';
+import type { PricingLookupResult } from '@agent-usage/pricing';
 
 export type ScanResult = {
   filesScanned: number;
+  filesSkipped: number;
   sessionsFound: number;
   messagesFound: number;
   warnings: ParserWarning[];
@@ -32,27 +50,26 @@ export async function scanSessions(
   options?: {
     provider?: Provider;
     paths?: string[];
+    /** When true, bypass incremental file cache and re-parse every file. */
+    force?: boolean;
   },
 ): Promise<ScanResult> {
   const { db, sqlite } = database;
   const result: ScanResult = {
     filesScanned: 0,
+    filesSkipped: 0,
     sessionsFound: 0,
     messagesFound: 0,
     warnings: [],
     errors: [],
   };
 
-  // A privacy mode persisted via the CLI/web (`settings` table) overrides the
-  // config-file default, so `privacy set` reliably affects subsequent scans.
   const persistedPrivacy = getSetting(db, 'privacyMode') as PrivacyMode | undefined;
   const privacyMode: PrivacyMode = persistedPrivacy ?? config.privacyMode;
 
-  // Create scan run record
   const scanRunId = insertScanRun(db, { status: 'running', provider: options?.provider }) as number;
 
   try {
-    // Discover files
     const files = await discoverSessionFiles(config, options?.paths);
     const filteredFiles = options?.provider
       ? files.filter((f: { provider: Provider }) => f.provider === options.provider)
@@ -64,12 +81,17 @@ export async function scanSessions(
 
     for (const file of filteredFiles) {
       try {
-        // Read the full file once: a streaming hash for dedup, a sample for
-        // parser detection. Hashing the entire content (not just the first 4 KB)
-        // means appended sessions are correctly re-ingested.
+        const stat = fs.statSync(file.path);
         const content = fs.readFileSync(file.path, 'utf-8');
         const sample = content.slice(0, 4096);
         const fileHash = crypto.createHash('sha256').update(content).digest('hex');
+        const mtimeMs = stat.mtimeMs;
+
+        if (!options?.force && isFileUnchanged(sqlite, file.path, fileHash, mtimeMs)) {
+          result.filesSkipped++;
+          continue;
+        }
+
         const parser = getParserForFile(file.path, sample);
 
         if (!parser) {
@@ -77,60 +99,62 @@ export async function scanSessions(
             file: file.path,
             message: 'No parser found for this file format',
             severity: 'warning',
+            code: 'unparsed-format',
           });
           continue;
         }
 
-        // Parse the file
         const parseResult = await parser.parse(file.path, {
           privacyMode,
+          estimatePromptOnlySources: config.estimatePromptOnlySources,
+          storeRawRecords: config.storeRawRecords,
         });
 
-        // Store sessions
-        for (const session of parseResult.sessions) {
+        for (const rawSession of parseResult.sessions) {
+          const session = enrichSession(rawSession, file.path, privacyMode, config.storeRawRecords);
           const sessionId = upsertSession(db, session, fileHash) as string;
 
-          // Calculate cost
           const sessionModel = pickSessionModel(session);
           const pricing = lookupPricing(
             sessionModel,
             providerToPricingProvider(session.provider),
             pricingModels,
+            'api-standard',
+            config.modelAliases,
           );
 
-          if (pricing.pricing) {
-            const { cost, isEstimated } = calculateCost(session.totals, pricing.pricing);
-            const costEstimated = isEstimated || pricing.isEstimated;
-            sqlite
-              .prepare(
-                'UPDATE sessions SET estimated_cost = ?, model = ?, cost_estimated = ? WHERE id = ?',
-              )
-              .run(cost, sessionModel || 'unknown', costEstimated ? 1 : 0, sessionId);
-          } else {
-            // No pricing available at all — keep cost at 0 but mark estimated.
-            sqlite
-              .prepare('UPDATE sessions SET cost_estimated = 1, model = ? WHERE id = ?')
-              .run(sessionModel || 'unknown', sessionId);
-          }
+          const costResult = resolveSessionCost(session, pricing, config);
+          updateSessionCosts(db, sessionId, {
+            estimatedCost: costResult.displayCost,
+            simulatedCost: costResult.simulatedCost,
+            model: sessionModel || 'unknown',
+            costEstimated: costResult.estimated,
+            recordedCost: costResult.recordedCost,
+            pricingSource: costResult.pricingSource,
+          });
 
-          // Store messages
           upsertMessages(db, sessionId, session.messages);
 
           result.sessionsFound++;
           result.messagesFound += session.messages.length;
         }
 
-        // Store warnings
         for (const warning of parseResult.warnings) {
           result.warnings.push(warning);
           insertParserWarning(db, scanRunId, warning);
         }
+
+        markFileScanned(sqlite, file.path, fileHash, mtimeMs);
+        updateScanRunProgress(db, scanRunId, {
+          filesScanned: result.filesScanned - result.filesSkipped,
+          sessionsFound: result.sessionsFound,
+          messagesFound: result.messagesFound,
+        });
       } catch (e) {
         result.errors.push(`Error processing ${file.path}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
 
-    // Update scan run
     sqlite
       .prepare(
         'UPDATE scan_runs SET completed_at = ?, status = ?, files_scanned = ?, sessions_found = ?, messages_found = ?, warnings_count = ? WHERE id = ?',
@@ -161,6 +185,100 @@ export async function scanSessions(
   return result;
 }
 
+/** Apply registry defaults and derived counts to a parsed session. */
+export function enrichSession(
+  session: NormalizedSession,
+  sourcePath: string,
+  privacyMode: PrivacyMode,
+  storeRawRecords = false,
+): NormalizedSession {
+  const def = PROVIDER_REGISTRY[session.provider];
+  const totals = normalizeTokenTotals(session.totals);
+  const messageCount = session.messageCount ?? session.messages.length;
+  const promptCount =
+    session.promptCount ?? session.messages.filter((m) => m.role === 'user').length;
+
+  const tokenUsageEstimated =
+    session.tokenUsageEstimated ??
+    session.messages.some(
+      (m) =>
+        m.usageConfidence === 'estimated-from-text' ||
+        (m.inputTokens != null && m.usageConfidence === undefined && def?.defaultConfidence === 'estimated-from-text'),
+    );
+
+  return {
+    ...session,
+    sourcePath: session.sourcePath ?? sourcePath,
+    storageKind: session.storageKind ?? def?.storageKinds[0],
+    supportLevel: session.supportLevel ?? def?.supportLevel,
+    usageConfidence: session.usageConfidence ?? def?.defaultConfidence,
+    messageCount,
+    promptCount,
+    rawRetention: session.rawRetention ?? privacyMode,
+    totals,
+    tokenUsageEstimated,
+    messages: session.messages.map((msg) => {
+      const sanitized = sanitizeMessageForPrivacy(msg, privacyMode, storeRawRecords);
+      return {
+        ...sanitized,
+        usageConfidence: msg.usageConfidence ?? session.usageConfidence ?? def?.defaultConfidence,
+        contentHidden:
+          sanitized.contentHidden ??
+          (privacyMode === 'disabled' && !sanitized.contentText),
+      };
+    }),
+  };
+}
+
+function resolveSessionCost(
+  session: NormalizedSession,
+  pricing: PricingLookupResult,
+  config: AppConfig,
+): {
+  displayCost: number;
+  simulatedCost: number;
+  recordedCost?: number;
+  estimated: boolean;
+  pricingSource: PricingSource;
+} {
+  const recordedCost = session.costs?.recordedCost ?? session.metadata?.recordedCost as number | undefined;
+  const pricingSource = pricingSourceFromLookup(pricing);
+
+  let simulatedCost = 0;
+  let costEstimated = true;
+
+  if (pricing.pricing) {
+    const { cost, isEstimated } = calculateCost(session.totals, pricing.pricing);
+    simulatedCost = cost;
+    costEstimated = isEstimated || pricing.isEstimated;
+  }
+
+  session.costs = {
+    recordedCost,
+    simulatedCost,
+    pricingSource,
+    currency: config.currency,
+    estimated: costEstimated,
+  };
+
+  const useSimulated = config.resimulateRecordedCosts || recordedCost == null;
+  const displayCost = useSimulated ? simulatedCost : recordedCost;
+
+  return {
+    displayCost,
+    simulatedCost,
+    recordedCost,
+    estimated: useSimulated ? costEstimated : false,
+    pricingSource,
+  };
+}
+
+function pricingSourceFromLookup(pricing: PricingLookupResult): PricingSource {
+  if (!pricing.pricing) return 'none';
+  if (pricing.isEstimated) return 'fallback';
+  return 'exact';
+}
+
 function ensurePricingModels(db: AppDatabase['db']): ModelPricing[] {
   const storedModels = getPricingModels(db);
   if (storedModels.length > 0) {
@@ -185,7 +303,6 @@ function ensurePricingModels(db: AppDatabase['db']): ModelPricing[] {
   return normalizeStoredPricing(getPricingModels(db));
 }
 
-/** Pick the most representative model for a session (first message that names one). */
 function pickSessionModel(session: NormalizedSession): string | undefined {
   for (const message of session.messages) {
     if (message.model) return message.model;
@@ -209,47 +326,114 @@ function normalizeStoredPricing(models: ReturnType<typeof getPricingModels>): Mo
 }
 
 export function getDefaultConfig(): AppConfig {
+  const providers = {} as AppConfig['providers'];
+  for (const def of listProviders()) {
+    providers[def.id] = {
+      enabled: def.enabledByDefault,
+      paths: [],
+    };
+  }
   return {
     privacyMode: 'disabled',
-    providers: {
-      claude: { enabled: true, paths: [] },
-      codex: { enabled: true, paths: [] },
-      gemini: { enabled: true, paths: [] },
-    },
+    providers,
     customPaths: [],
     currency: 'USD',
     storeRawRecords: false,
+    resimulateRecordedCosts: false,
+    estimatePromptOnlySources: false,
   };
+}
+
+export type ConfigValidation = {
+  ok: boolean;
+  path?: string;
+  errors?: string[];
+};
+
+function findConfigPath(configPath?: string): string | undefined {
+  if (configPath) {
+    return fs.existsSync(configPath) ? configPath : undefined;
+  }
+
+  const possiblePaths = [
+    'agent-usage.config.json',
+    '.agent-usage.config.json',
+    'agent-usage.config.jsonc',
+  ];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
+}
+
+/** Validate the on-disk config file without loading it into the app. */
+export function validateConfig(configPath?: string): ConfigValidation {
+  const resolved = findConfigPath(configPath);
+  if (!resolved) {
+    return { ok: true };
+  }
+
+  try {
+    const content = fs.readFileSync(resolved, 'utf-8');
+    const raw = JSON.parse(content);
+    const parsed = safeParseAppConfig(raw);
+    if (parsed.success) {
+      return { ok: true, path: resolved };
+    }
+    return {
+      ok: false,
+      path: resolved,
+      errors: parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      path: resolved,
+      errors: [e instanceof Error ? e.message : String(e)],
+    };
+  }
+}
+
+function warnInvalidConfig(path: string, errors: string[]): void {
+  const detail = errors.map((e) => `  - ${e}`).join('\n');
+  console.warn(
+    `Warning: invalid config at ${path}; using defaults.\n${detail}`,
+  );
 }
 
 export function loadConfig(configPath?: string): AppConfig {
   const defaultConfig = getDefaultConfig();
+  const resolved = findConfigPath(configPath);
 
-  if (!configPath) {
-    // Try to load from current directory
-    const possiblePaths = [
-      'agent-usage.config.json',
-      '.agent-usage.config.json',
-      'agent-usage.config.jsonc',
-    ];
-
-    for (const p of possiblePaths) {
-      if (fs.existsSync(p)) {
-        configPath = p;
-        break;
-      }
-    }
-  }
-
-  if (configPath && fs.existsSync(configPath)) {
+  if (resolved) {
     try {
-      const content = fs.readFileSync(configPath, 'utf-8');
-      const config = JSON.parse(content);
-      return { ...defaultConfig, ...config };
-    } catch {
-      // Return default config on parse error
+      const content = fs.readFileSync(resolved, 'utf-8');
+      const raw = JSON.parse(content);
+      const parsed = safeParseAppConfig(raw);
+      if (parsed.success) {
+        const config = parsed.data;
+        return {
+          ...defaultConfig,
+          ...config,
+          providers: { ...defaultConfig.providers, ...config.providers },
+        };
+      }
+      warnInvalidConfig(
+        resolved,
+        parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`),
+      );
+    } catch (e) {
+      warnInvalidConfig(resolved, [e instanceof Error ? e.message : String(e)]);
     }
   }
 
   return defaultConfig;
+}
+
+/** Persist config to agent-usage.config.json in cwd (creates file if missing). */
+export function saveConfig(config: AppConfig, configPath?: string): string {
+  const target = findConfigPath(configPath) ?? 'agent-usage.config.json';
+  fs.writeFileSync(target, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+  return target;
 }

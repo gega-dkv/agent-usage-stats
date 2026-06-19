@@ -41,3 +41,22 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  # Optional: requires Rust + platform SDKs — not run on every PR.
+  desktop-build:
+    runs-on: macos-latest
+    if: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm desktop:build
