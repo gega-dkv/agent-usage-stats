@@ -338,28 +338,28 @@ Provider evaluation backlog (not in v1 registry): Windsurf, Cline, Continue, Roo
 
 ## Phase 9: Tests
 
-1. Add integration test for scan -> DB -> dashboard query (include temp DB fixture setup).
-2. Add CLI JSON contract tests for all commands.
-3. Add web API contract tests.
+1. Add integration test for scan -> DB -> dashboard query (include temp DB fixture setup). **Done**
+2. Add CLI JSON contract tests for all commands. **Done**
+3. Add web API contract tests. **Done**
 4. Add privacy mode tests.
-   - Fresh install stores no prompt content.
-   - Preview/full/raw only affect future scans unless rescanned.
-   - Purge removes stored prompt/response/raw content.
+   - Fresh install stores no prompt content. **Done**
+   - Preview/full/raw only affect future scans unless rescanned. **Done**
+   - Purge removes stored prompt/response/raw content. **Done**
 5. Add parser robustness tests.
-   - Corrupt files.
-   - Unknown records.
-   - Missing usage fields.
-   - Duplicate sessions.
-   - Large JSONL files.
+   - Corrupt files. **Done**
+   - Unknown records. **Done**
+   - Missing usage fields. **Done**
+   - Duplicate sessions. **Done**
+   - Large JSONL files. **Done**
 6. Add provider parser tests.
-   - **Every** provider (including Claude, Codex, Gemini) has fixture-backed tests per Phase 2.17.
-   - Every parser handles missing/corrupt files without crashing.
-   - SQLite provider tests assert source DBs are opened read-only.
-   - OpenCode tests cover SQLite and legacy JSON.
-   - Copilot tests cover OpenTelemetry enabled and missing-export states.
-   - Crush tests cover detected-only behavior.
-   - Aider, Cursor, and SpecStory tests assert token usage is not invented unless estimation is explicitly enabled.
-7. Add CLI command tests under `apps/cli/tests`.
+   - **Every** provider (including Claude, Codex, Gemini) has fixture-backed tests per Phase 2.17. **Done**
+   - Every parser handles missing/corrupt files without crashing. **Done**
+   - SQLite provider tests assert source DBs are opened read-only. **Done**
+   - OpenCode tests cover SQLite and legacy JSON. **Done**
+   - Copilot tests cover OpenTelemetry enabled and missing-export states. **Done**
+   - Crush tests cover detected-only behavior. **Done**
+   - Aider, Cursor, and SpecStory tests assert token usage is not invented unless estimation is explicitly enabled. **Done**
+7. Add CLI command tests under `apps/cli/tests`. **Done**
 
 ---
 

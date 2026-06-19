@@ -1,3 +1,10 @@
+/**
+ * Integration tests use an isolated temp SQLite file per test:
+ *   dbPath = path.join(os.tmpdir(), `aus-scan-${Date.now()}-${random}.db`)
+ *   database = initializeDatabase(dbPath)
+ * Teardown closes sqlite and unlinks the db / -wal / -shm siblings.
+ * Set AGENT_USAGE_DB_PATH in CLI subprocess tests the same way.
+ */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
@@ -5,7 +12,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { initializeDatabase, type AppDatabase } from '@agent-usage/db';
 import { getSchemaVersion, CURRENT_SCHEMA_VERSION } from '@agent-usage/db';
-import { getStatsSummary } from '@agent-usage/db';
+import {
+  getStatsSummary,
+  getDailyUsage,
+  getGroupedUsage,
+  getSessions,
+} from '@agent-usage/db';
 import {
   scanSessions,
   getDefaultConfig,
@@ -136,6 +148,39 @@ describe('scan pipeline integration', () => {
     ).c;
 
     expect(secondCount).toBe(firstCount);
+  });
+
+  it('feeds dashboard query helpers after scan (stats, rollups, sessions)', async () => {
+    const config = getDefaultConfig();
+    await scanSessions(database, config, {
+      paths: [claudeFixture],
+      provider: 'claude',
+      force: true,
+    });
+
+    const summary = getStatsSummary(database.db);
+    expect(summary.totalSessions).toBeGreaterThan(0);
+    expect(summary.totalTokens).toBeGreaterThan(0);
+    expect(typeof summary.totalEstimatedCost).toBe('number');
+
+    const daily = getDailyUsage(database.db);
+    expect(daily.length).toBeGreaterThan(0);
+    expect(daily[0]).toMatchObject({
+      provider: expect.any(String),
+      sessions: expect.any(Number),
+      totalTokens: expect.any(Number),
+    });
+
+    const byProvider = getGroupedUsage(database.db, { groupBy: 'provider', metric: 'tokens' });
+    expect(byProvider.some((g) => g.label === 'claude' && g.value > 0)).toBe(true);
+
+    const sessions = getSessions(database.db, { limit: 10, orderBy: 'date' });
+    expect(sessions.length).toBeGreaterThan(0);
+    expect(sessions[0]).toMatchObject({
+      id: expect.any(String),
+      provider: 'claude',
+      totalTokens: expect.any(Number),
+    });
   });
 
   it('exposes quality breakdown in stats summary JSON fields', async () => {

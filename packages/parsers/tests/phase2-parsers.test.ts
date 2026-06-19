@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import * as dbPkg from '@agent-usage/db';
 import { qwenParser } from '../src/qwen.js';
 import { openclawParser } from '../src/openclaw.js';
 import { kimiParser } from '../src/kimi.js';
@@ -121,6 +122,52 @@ describe('Phase 2 provider parsers', () => {
     const result = await parseFixture(copilotParser, 'copilot', 'valid');
     expect(result.sessions.length).toBeGreaterThan(0);
     expect(result.sessions[0].totals.inputTokens).toBeGreaterThan(0);
+  });
+
+  it('copilot warns when OpenTelemetry export is missing or empty', async () => {
+    const missing = await parseFixture(copilotParser, 'copilot', 'missing-fields');
+    expect(missing.sessions).toHaveLength(0);
+    expect(missing.warnings.some((w) => w.code === 'missing-token-fields')).toBe(true);
+
+    const corrupt = await parseFixture(copilotParser, 'copilot', 'corrupt');
+    expect(corrupt.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('sqlite-backed parsers open provider databases read-only', async () => {
+    const spy = vi.spyOn(dbPkg, 'openProviderDatabase');
+    try {
+      for (const [parser, provider] of [
+        [gooseParser, 'goose'],
+        [hermesParser, 'hermes'],
+        [kiloParser, 'kilo'],
+        [opencodeParser, 'opencode'],
+        [cursorParser, 'cursor'],
+      ] as const) {
+        await parseFixture(parser, provider, 'valid');
+      }
+      expect(spy.mock.calls.length).toBeGreaterThan(0);
+      for (const call of spy.mock.calls) {
+        expect(call[1]?.readonly ?? true).toBe(true);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('cursor does not invent tokens unless estimation enabled', async () => {
+    const md = await cursorParser.parse(fixture('cursor', 'missing-fields', 'md'), {
+      privacyMode: 'disabled',
+      estimatePromptOnlySources: false,
+    });
+    expect(md.sessions[0]?.messages.every((m) => !m.inputTokens && !m.outputTokens)).toBe(true);
+  });
+
+  it('specstory does not invent tokens unless estimation enabled', async () => {
+    const result = await specstoryParser.parse(fixture('specstory', 'missing-fields'), {
+      privacyMode: 'disabled',
+      estimatePromptOnlySources: false,
+    });
+    expect(result.sessions[0]?.messages.every((m) => !m.inputTokens && !m.outputTokens)).toBe(true);
   });
 
   it('opencode parses legacy json and sqlite fixtures', async () => {

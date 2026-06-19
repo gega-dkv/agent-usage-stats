@@ -108,12 +108,13 @@ scanCmd
   .description('Show recent scan runs')
   .option('-n, --limit <number>', 'Number of runs to show', '20')
   .option('--json', 'Output as JSON')
-  .action((options: { limit: string; json?: boolean }) => {
+  .action((options: { limit: string; json?: boolean }, command) => {
+    const json = wantsJson(options, command);
     const config = loadConfig();
     const { db } = initializeDatabase(config.dbPath);
     const runs = getScanRuns(db, parseInt(options.limit, 10));
 
-    if (options.json) {
+    if (json) {
       console.log(JSON.stringify({ runs }, null, 2));
       return;
     }
@@ -513,7 +514,8 @@ program
   .option('-n, --limit <number>', 'Maximum warnings to show', '50')
   .option('--scan-run <id>', 'Filter by scan run id')
   .option('--json', 'Output as JSON')
-  .action((options: { limit: string; scanRun?: string; json?: boolean }) => {
+  .action((options: { limit: string; scanRun?: string; json?: boolean }, command) => {
+    const json = wantsJson(options, command);
     const config = loadConfig();
     const { db } = initializeDatabase(config.dbPath);
     const warnings = getParserWarnings(db, {
@@ -521,7 +523,7 @@ program
       limit: parseInt(options.limit, 10),
     });
 
-    if (options.json) {
+    if (json) {
       console.log(JSON.stringify({ warnings }, null, 2));
       return;
     }

@@ -129,6 +129,85 @@ describe('privacy mode integration', () => {
     expect(rawRows.length).toBeGreaterThan(0);
   });
 
+  it('fresh install defaults to disabled privacy with no stored prompt bodies', async () => {
+    const freshPath = path.join(
+      os.tmpdir(),
+      `aus-fresh-${Date.now()}-${Math.random().toString(36).slice(2)}.db`,
+    );
+    const freshDb = initializeDatabase(freshPath);
+    try {
+      const config = getDefaultConfig();
+      expect(config.privacyMode).toBe('disabled');
+
+      await scanSessions(freshDb, config, {
+        paths: [claudeFixture],
+        provider: 'claude',
+        force: true,
+      });
+
+      const rows = messageRows(freshDb);
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every((r) => r.content_text == null && r.raw == null)).toBe(true);
+    } finally {
+      freshDb.sqlite.close();
+      for (const suffix of ['', '-wal', '-shm']) {
+        try {
+          fs.unlinkSync(freshPath + suffix);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  });
+
+  it('privacy mode changes only apply on forced rescan, not incremental skip', async () => {
+    const disabled = getDefaultConfig();
+    await scanSessions(database, disabled, {
+      paths: [claudeFixture],
+      provider: 'claude',
+      force: true,
+    });
+    const disabledRows = messageRows(database);
+    expect(disabledRows.every((r) => r.content_text == null)).toBe(true);
+
+    const fullConfig = { ...getDefaultConfig(), privacyMode: 'full' as const };
+    const skipped = await scanSessions(database, fullConfig, {
+      paths: [claudeFixture],
+      provider: 'claude',
+    });
+    expect(skipped.filesSkipped).toBe(1);
+
+    const stillDisabled = messageRows(database);
+    expect(stillDisabled.every((r) => r.content_text == null)).toBe(true);
+
+    await scanSessions(database, fullConfig, {
+      paths: [claudeFixture],
+      provider: 'claude',
+      force: true,
+    });
+    const afterRescan = messageRows(database);
+    expect(afterRescan.some((r) => r.content_text != null && r.content_text.length > 0)).toBe(true);
+  });
+
+  it('preview and raw modes differ only after forced rescan', async () => {
+    await scanSessions(database, { ...getDefaultConfig(), privacyMode: 'preview' }, {
+      paths: [claudeFixture],
+      provider: 'claude',
+      force: true,
+    });
+    const previewRows = messageRows(database);
+    expect(previewRows.some((r) => r.content_preview.length > 20)).toBe(true);
+    expect(previewRows.every((r) => r.content_text == null)).toBe(true);
+
+    await scanSessions(database, { ...getDefaultConfig(), privacyMode: 'raw' }, {
+      paths: [claudeFixture],
+      provider: 'claude',
+      force: true,
+    });
+    const rawRows = messageRows(database).filter((r) => r.raw != null);
+    expect(rawRows.length).toBeGreaterThan(0);
+  });
+
   it('purge-content removes stored prompt, response, raw, and tool previews', async () => {
     const config = { ...getDefaultConfig(), privacyMode: 'full' as const, storeRawRecords: true };
     await scanSessions(database, config, {
