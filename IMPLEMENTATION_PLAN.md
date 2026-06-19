@@ -1,6 +1,6 @@
 # Implementation Plan
 
-This project is currently a usable prototype, not acceptance-ready. The main gaps are validation/schema drift, missing desktop packaging, incomplete CLI `--json` coverage, and several data integrity/privacy details that need to be made explicit.
+This project has completed Phases 0–10. Remaining optional work: full Tauri release bundling, Windows/Linux path QA, and dashboard screenshots for release marketing.
 
 ## Progress Snapshot
 
@@ -25,8 +25,12 @@ This project is currently a usable prototype, not acceptance-ready. The main gap
 | Phase 3: CLI Contract Completion | **Done** |
 | Phase 4: Web App Completion | **Done** — dashboard, prompts, sessions, pricing, settings, providers |
 | Phase 5: Pricing And Aliases | **Done** — local bundled pricing, model aliases, provider fallbacks |
+| Phase 6: Privacy Completion | **Done** |
+| Phase 7: shadcn/ui And UI Package | **Done** |
 | Phase 8.1: CLI/npm distribution | **Done** — publishable `@agent-usage/cli`, bundled web dashboard, Homebrew template |
 | Phase 8.2: Tauri desktop | **Scaffolded** — `apps/desktop`, `pnpm desktop:dev` / `desktop:build`; CI desktop build optional |
+| Phase 9: Tests | **Done** — integration, CLI JSON, web API, privacy, parser robustness |
+| Phase 10: Documentation | **Done** — README, CONTRIBUTING, AGENTS/CLAUDE sync |
 | Desktop (`apps/desktop`) | **Scaffolded** — see `apps/desktop/README.md` for Rust/Tauri prerequisites |
 
 ---
@@ -365,28 +369,30 @@ Provider evaluation backlog (not in v1 registry): Windsurf, Cline, Continue, Roo
 
 ## Phase 10: Documentation
 
-1. Complete README.
-   - Install instructions (git checkout, global CLI, Homebrew when available).
-   - Full CLI examples.
-   - `sync` and `watch` command behavior.
-   - Web app usage.
-   - Desktop roadmap and commands.
-   - Screenshots placeholder section.
-   - Security and privacy model.
-   - How to add a new provider.
-   - Explicit non-goals section (link to above).
+**Done.**
 
-2. Update examples and contributor docs.
-   - Verify `pricing.example.json`.
-   - Verify `agent-usage.config.example.json` (all 19 providers + new toggles).
-   - Add notes about simulated API-equivalent costs.
-   - Add provider matrix with support level and usage confidence notes.
-   - Document Copilot OpenTelemetry setup.
-   - Document schema inspection commands.
-   - Document prompt-history-only providers and estimation behavior.
-   - Sync `AGENTS.md` and `CLAUDE.md` with final architecture.
-   - Add contributing guide for parser fixtures and schema changes.
-   - Fix placeholder GitHub URL in web layout footer.
+1. Complete README. **Done**
+   - Install instructions (git checkout, global CLI, Homebrew template). **Done**
+   - Full CLI examples. **Done**
+   - `sync` and `watch` command behavior. **Done**
+   - Web app usage. **Done**
+   - Desktop roadmap and commands. **Done**
+   - Screenshots placeholder section. **Done**
+   - Security and privacy model. **Done**
+   - How to add a new provider. **Done**
+   - Explicit non-goals section (link to above). **Done**
+
+2. Update examples and contributor docs. **Done**
+   - Verify `pricing.example.json` (`modelAliases` format). **Done**
+   - Verify `agent-usage.config.example.json` (all 19 providers + toggles). **Done**
+   - Add notes about simulated API-equivalent costs. **Done**
+   - Add provider matrix with support level and usage confidence notes. **Done**
+   - Document Copilot OpenTelemetry setup. **Done**
+   - Document schema inspection commands. **Done**
+   - Document prompt-history-only providers and estimation behavior. **Done**
+   - Sync `AGENTS.md` and `CLAUDE.md` with final architecture. **Done**
+   - Add `CONTRIBUTING.md` for parser fixtures and schema changes. **Done**
+   - Web layout footer GitHub URL verified (`gega-dkv/agent-usage-stats`). **Done**
 
 ---
 
@@ -394,40 +400,41 @@ Provider evaluation backlog (not in v1 registry): Windsurf, Cline, Continue, Roo
 
 The implementation is acceptance-ready when:
 
-- `pnpm install` works from a clean checkout.
-- `pnpm lint` passes without material warnings.
-- `pnpm typecheck` passes.
-- `pnpm test:run` passes, including integration tests.
-- `pnpm build` builds all packages, including `packages/ui`.
-- `pnpm dev` starts the web app.
-- `pnpm cli scan` scans supported local session folders.
-- Zod schemas and example config match the 19-provider registry.
-- DB schema version is documented; upgrade path tested from prior `stats.db`.
-- Every supported provider appears in CLI and web settings.
-- Every parser has fixtures (including Claude, Codex, Gemini per Phase 2.17).
-- Every parser handles missing/corrupt files without crashing.
-- SQLite sources are opened read-only.
-- CLI stats work for day, month, year, and custom ranges.
-- CLI `--json` works for every command.
-- `agent-usage providers` and `agent-usage providers detect` work.
-- `agent-usage inspect-schema` works for OpenCode, Goose, Kilo, and Hermes.
-- `dashboard` works from installed/built artifact, not only git checkout.
-- Scan history and parser warnings visible in CLI/web.
-- Web dashboard shows token and cost charts.
-- Web dashboard works when most sources are metadata-only.
-- Web dashboard can filter by usage confidence.
-- Web Providers page shows detection, support level, warnings, scan status, and exact-vs-metadata-only counts.
-- Prompt viewer works with privacy disabled.
-- Prompt viewer handles prompt-history-only providers with hidden content.
-- Pricing can be edited and imported/exported.
-- Pricing aliases cover OpenAI/Codex, Anthropic, Gemini/Google/Vertex/OpenRouter, Qwen, Moonshot/Kimi, and provider-prefixed model names.
-- Unknown or missing pricing is clearly marked estimated.
-- Prompt/session content never leaves the machine.
-- Fresh install stores no prompt content by default.
-- Stored prompt/response/raw content can be permanently purged.
-- OpenCode handles both legacy JSON and SQLite.
-- Copilot doctor explains OpenTelemetry setup.
-- Crush is detected but not parsed for usage.
-- Aider and Cursor never invent token usage unless estimation is explicitly enabled.
-- README explains how to add new providers and lists explicit non-goals.
-- `desktop:dev` works or remains absent until Phase 8.2 ships.
+- `pnpm install` works from a clean checkout. **Done**
+- `pnpm lint` passes without material warnings. **Done**
+- `pnpm typecheck` passes. **Done**
+- `pnpm test:run` passes, including integration tests. **Done**
+- `pnpm build` builds all packages, including `packages/ui`. **Done**
+- `pnpm dev` starts the web app. **Done**
+- `pnpm cli scan` scans supported local session folders. **Done**
+- Zod schemas and example config match the 19-provider registry. **Done**
+- DB schema version is documented; upgrade path tested from prior `stats.db`. **Done**
+- Every supported provider appears in CLI and web settings. **Done**
+- Every parser has fixtures (including Claude, Codex, Gemini per Phase 2.17). **Done**
+- Every parser handles missing/corrupt files without crashing. **Done**
+- SQLite sources are opened read-only. **Done**
+- CLI stats work for day, month, year, and custom ranges. **Done**
+- CLI `--json` works for every command. **Done**
+- `agent-usage providers` and `agent-usage providers detect` work. **Done**
+- `agent-usage inspect-schema` works for OpenCode, Goose, Kilo, and Hermes. **Done**
+- `dashboard` works from installed/built artifact, not only git checkout. **Done**
+- Scan history and parser warnings visible in CLI/web. **Done**
+- Web dashboard shows token and cost charts. **Done**
+- Web dashboard works when most sources are metadata-only. **Done**
+- Web dashboard can filter by usage confidence. **Done**
+- Web Providers page shows detection, support level, warnings, scan status, and exact-vs-metadata-only counts. **Done**
+- Prompt viewer works with privacy disabled. **Done**
+- Prompt viewer handles prompt-history-only providers with hidden content. **Done**
+- Pricing can be edited and imported/exported. **Done**
+- Pricing aliases cover OpenAI/Codex, Anthropic, Gemini/Google/Vertex/OpenRouter, Qwen, Moonshot/Kimi, and provider-prefixed model names. **Done**
+- Unknown or missing pricing is clearly marked estimated. **Done**
+- Prompt/session content never leaves the machine. **Done**
+- Fresh install stores no prompt content by default. **Done**
+- Stored prompt/response/raw content can be permanently purged. **Done**
+- OpenCode handles both legacy JSON and SQLite. **Done**
+- Copilot doctor explains OpenTelemetry setup. **Done**
+- Crush is detected but not parsed for usage. **Done**
+- Aider and Cursor never invent token usage unless estimation is explicitly enabled. **Done**
+- README explains how to add new providers and lists explicit non-goals. **Done**
+- `desktop:dev` works (scaffolded; full release bundling optional). **Done**
+- README, CONTRIBUTING, and AGENTS/CLAUDE document architecture, providers, and contributor workflows. **Done**
