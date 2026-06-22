@@ -11,6 +11,8 @@ type ProviderDonutChartProps = {
   size?: number;
   title?: string;
   formatValue?: (value: number) => string;
+  /** Resolve a color for a label (e.g. provider hue). Falls back to the palette. */
+  colorFor?: (label: string, index: number) => string | undefined;
 };
 
 export function ProviderDonutChart({
@@ -18,6 +20,7 @@ export function ProviderDonutChart({
   size = 200,
   title,
   formatValue,
+  colorFor,
 }: ProviderDonutChartProps) {
   if (data.length === 0) {
     return (
@@ -45,7 +48,7 @@ export function ProviderDonutChart({
     const start = acc;
     const end = acc + angle;
     acc = end;
-    return { ...d, start, end, color: d.color || CHART_COLORS[i % CHART_COLORS.length] };
+    return { ...d, start, end, color: d.color || colorFor?.(d.label, i) || CHART_COLORS[i % CHART_COLORS.length] };
   });
 
   function arc(start: number, end: number) {

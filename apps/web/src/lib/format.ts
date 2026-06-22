@@ -1,18 +1,54 @@
-import { getProviderDefinition } from '@agent-usage/shared';
+import { providerTheme, providerHsl } from './provider-theme';
+
+// Re-export so existing imports of providerLabel from format keep working.
+export { providerLabel } from './provider-theme';
 
 export function formatNumber(n: number): string {
+  if (!Number.isFinite(n)) return '0';
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
 }
 
-export function formatCurrency(n: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  }).format(n);
+/**
+ * Format a number as a currency string. Currency defaults to USD but can be
+ * overridden per-call (e.g. from the configured settings currency). We keep a
+ * module-level override so legacy callers without a currency arg still respect
+ * the user's configured currency once `setCurrencyOverride` is called.
+ */
+let currencyOverride = 'USD';
+
+export function setCurrencyOverride(currency: string): void {
+  if (currency && currency.length === 3) currencyOverride = currency.toUpperCase();
+}
+
+export function getCurrencyOverride(): string {
+  return currencyOverride;
+}
+
+const CURRENCY_LOCALE: Record<string, string> = {
+  USD: 'en-US',
+  EUR: 'de-DE',
+  GBP: 'en-GB',
+  JPY: 'ja-JP',
+  CAD: 'en-CA',
+  AUD: 'en-AU',
+};
+
+export function formatCurrency(n: number, currency?: string): string {
+  const cur = (currency || currencyOverride).toUpperCase();
+  const minFrac = cur === 'JPY' ? 0 : 2;
+  try {
+    return new Intl.NumberFormat(CURRENCY_LOCALE[cur] ?? 'en-US', {
+      style: 'currency',
+      currency: cur,
+      minimumFractionDigits: minFrac,
+      maximumFractionDigits: minFrac === 0 ? 0 : 4,
+    }).format(n);
+  } catch {
+    // Fallback if Intl doesn't recognize the currency code.
+    return `${cur} ${n.toFixed(2)}`;
+  }
 }
 
 export function formatDate(iso?: string): string {
@@ -33,34 +69,63 @@ export function formatDateTime(iso?: string): string {
   }
 }
 
+/** Relative time like "2m ago", "3h ago", "5d ago". */
+export function formatRelativeTime(iso?: string): string {
+  if (!iso) return 'never';
+  try {
+    const then = new Date(iso).getTime();
+    const now = Date.now();
+    const diff = Math.max(0, now - then);
+    const sec = Math.round(diff / 1000);
+    if (sec < 60) return 'just now';
+    const min = Math.round(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.round(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    const day = Math.round(hr / 24);
+    if (day < 30) return `${day}d ago`;
+    const mo = Math.round(day / 30);
+    if (mo < 12) return `${mo}mo ago`;
+    return `${Math.round(mo / 12)}y ago`;
+  } catch {
+    return 'never';
+  }
+}
+
+/**
+ * Tailwind gradient classes for a provider (stat cards, icon chips).
+ * Delegates to the unified provider-theme map.
+ */
 export function providerColor(provider: string): string {
-  switch (provider) {
-    case 'claude':
-      return 'from-orange-500 to-amber-500';
-    case 'codex':
-      return 'from-emerald-500 to-teal-500';
-    case 'gemini':
-      return 'from-blue-500 to-indigo-500';
-    default:
-      return 'from-slate-500 to-slate-600';
-  }
+  return providerTheme(provider).gradient;
 }
 
+/** hsl() string for a provider, used in SVG charts. */
+export function providerSolidColor(provider: string, lightness = 55): string {
+  return providerHsl(provider, lightness);
+}
+
+/**
+ * Legacy badge className shim — returns a stable badge class string.
+ * Prefer the `<ProviderBadge>` component for new code, which uses inline
+ * styles derived from the provider hue (more accurate colors, full coverage).
+ */
 export function providerBadge(provider: string): string {
-  switch (provider) {
-    case 'claude':
-      return 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300 border-orange-200 dark:border-orange-800';
-    case 'codex':
-      return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
-    case 'gemini':
-      return 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-blue-200 dark:border-blue-800';
-    default:
-      return 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700';
-  }
+  return providerTheme(provider).gradient;
 }
 
-export function providerLabel(provider: string): string {
-  const def = getProviderDefinition(provider);
-  if (def) return def.label;
-  return provider;
+/**
+ * Percent-change formatter for trend deltas.
+ * Returns a signed, rounded percentage, e.g. "+12%" / "-3%".
+ */
+export function formatPercentDelta(current: number, previous: number): { value: string; positive: boolean } {
+  if (!previous || previous === 0) {
+    return current > 0 ? { value: '+∞', positive: true } : { value: '0%', positive: true };
+  }
+  const delta = ((current - previous) / previous) * 100;
+  const rounded = Math.round(Math.abs(delta));
+  return {
+    value: `${delta >= 0 ? '+' : '-'}${rounded}%`,
+    positive: delta >= 0,
+  };
 }

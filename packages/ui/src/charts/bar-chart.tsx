@@ -12,6 +12,8 @@ type UsageBarChartProps = {
   title?: string;
   formatValue?: (value: number) => string;
   horizontal?: boolean;
+  /** Resolve a color for a label (e.g. provider hue). Falls back to the palette. */
+  colorFor?: (label: string, index: number) => string | undefined;
 };
 
 export function UsageBarChart({
@@ -20,6 +22,7 @@ export function UsageBarChart({
   title,
   formatValue,
   horizontal = true,
+  colorFor,
 }: UsageBarChartProps) {
   if (data.length === 0) {
     return (
@@ -55,7 +58,7 @@ export function UsageBarChart({
           {data.map((d, i) => {
             const y = padT + i * (barH + 8);
             const barW = (d.value / max) * chartW;
-            const color = d.color || CHART_COLORS[i % CHART_COLORS.length] || DEFAULT_LINE_COLOR;
+            const color = d.color || colorFor?.(d.label, i) || CHART_COLORS[i % CHART_COLORS.length] || DEFAULT_LINE_COLOR;
             return (
               <g key={i} className="group">
                 <text
@@ -134,7 +137,7 @@ export function UsageBarChart({
           const x = padL + i * (barWidth + 8);
           const barHeight = (d.value / max) * chartH;
           const y = padT + chartH - barHeight;
-          const color = d.color || CHART_COLORS[i % CHART_COLORS.length] || DEFAULT_LINE_COLOR;
+          const color = d.color || colorFor?.(d.label, i) || CHART_COLORS[i % CHART_COLORS.length] || DEFAULT_LINE_COLOR;
           return (
             <g key={i}>
               <rect x={x} y={y} width={barWidth} height={barHeight} fill={color} rx="4" tabIndex={0} />
