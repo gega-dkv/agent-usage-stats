@@ -35,10 +35,29 @@ import {
   providersWithParser,
 } from '@agent-usage/shared';
 import type { Provider } from '@agent-usage/shared';
+import { type ChalkInstance } from 'chalk';
 import fs from 'fs';
 import readline from 'readline/promises';
 import path from 'path';
 import { resolveWebAppTarget } from './web-app.js';
+import {
+  horizontalBar,
+  infoBox,
+  isInteractive,
+  maybePrintBanner,
+  maybePrintBannerAnimated,
+  palette,
+  printActivityCalendar,
+  printLogo,
+  printLogoAnimated,
+  printSection,
+  printTable,
+  providerColor,
+  setColorEnabled,
+  Spinner,
+  statusBadge,
+  supportBadge,
+} from './ui.js';
 
 const program = new Command();
 
@@ -84,6 +103,48 @@ function usageRowLabel(row: Record<string, unknown>): string {
   return String(row.date ?? row.week ?? row.month ?? row.year ?? 'N/A');
 }
 
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function metricCell(
+  value: number,
+  max: number,
+  format: (v: number) => string,
+  valueWidth: number,
+  barWidth: number,
+  barColor: ChalkInstance,
+): string {
+  const text = format(value).padStart(valueWidth);
+  const bar = horizontalBar(value, max, barWidth, barColor);
+  return `${text} ${bar}`;
+}
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function startOfWeeksAgo(weeks: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - weeks * 7);
+  return d.toISOString().slice(0, 10);
+}
+
+function privacyModeColor(mode: string): string {
+  switch (mode) {
+    case 'disabled':
+      return palette.muted(mode);
+    case 'preview':
+      return palette.info(mode);
+    case 'full':
+      return palette.success(mode);
+    case 'raw':
+      return palette.warning(mode);
+    default:
+      return palette.muted(mode);
+  }
+}
+
 function wantsJson(options: { json?: boolean }, command?: Command): boolean {
   if (options.json) return true;
   try {
@@ -96,7 +157,14 @@ function wantsJson(options: { json?: boolean }, command?: Command): boolean {
 program
   .name('agent-usage')
   .description('Local-first AI session usage analyzer')
-  .version('0.1.0');
+  .version('0.1.0')
+  .option('--no-color', 'Disable ANSI colors')
+  .hook('preAction', (_thisCommand, actionCommand) => {
+    const opts = actionCommand.optsWithGlobals() as { color?: boolean };
+    if (opts.color === false) {
+      setColorEnabled(false);
+    }
+  });
 
 // Scan command
 const scanCmd = program
@@ -119,63 +187,91 @@ scanCmd
       return;
     }
 
+    maybePrintBanner(options);
+    printSection('Recent scan runs');
+
     if (runs.length === 0) {
-      console.log('No scan runs recorded yet.');
+      console.log(palette.muted('No scan runs recorded yet.'));
       return;
     }
 
-    console.log('\nRecent scan runs:\n');
-    for (const run of runs) {
-      console.log(
-        `#${run.id}  ${run.status}  files=${run.filesScanned}  sessions=${run.sessionsFound}  warnings=${run.warningsCount}  ${run.startedAt}`,
-      );
-    }
+    const rows = runs.map((run) => {
+      const statusColor = run.status === 'success' ? palette.success : palette.error;
+      return [
+        palette.muted(`#${run.id}`),
+        statusColor(run.status),
+        `files=${palette.bold(String(run.filesScanned))}`,
+        `sessions=${palette.bold(String(run.sessionsFound))}`,
+        `warnings=${(run.warningsCount ?? 0) > 0 ? palette.warning(String(run.warningsCount ?? 0)) : palette.muted('0')}`,
+        palette.muted(String(run.startedAt)),
+      ];
+    });
+    printTable(['Run', 'Status', 'Files', 'Sessions', 'Warnings', 'Started'], rows, [
+      'left',
+      'left',
+      'right',
+      'right',
+      'right',
+      'left',
+    ]);
   });
 
 scanCmd
   .option('-p, --provider <provider>', 'Filter by provider (claude, codex, gemini)')
   .option('--path <paths...>', 'Custom paths to scan')
   .option('--json', 'Output as JSON')
-  .action(async (options) => {
+  .action(async (options, command) => {
+    const json = wantsJson(options, command);
     const config = loadConfig();
     const database = initializeDatabase(config.dbPath);
 
-    if (!options.json) {
-      console.log('Scanning session files...\n');
+    if (!json) {
+      maybePrintBanner(options);
+      printSection('Scanning session files');
     }
 
+    const label = options.provider
+      ? `Scanning ${providerDisplayName(options.provider as Provider)} sessions`
+      : 'Scanning all provider sessions';
+    const spinner = json ? undefined : new Spinner(label).start();
     const result = await scanSessions(database, config, {
       provider: options.provider as Provider | undefined,
       paths: options.path,
     });
+    spinner?.stop(result.errors.length === 0);
 
-    if (options.json) {
+    if (json) {
       console.log(JSON.stringify(result, null, 2));
       return;
     }
 
-    console.log(`Files scanned: ${result.filesScanned}`);
-    console.log(`Sessions found: ${result.sessionsFound}`);
-    console.log(`Messages found: ${result.messagesFound}`);
+    infoBox('Scan results', [
+      { label: 'Files scanned', value: palette.bold(String(result.filesScanned)) },
+      { label: 'Sessions found', value: palette.bold(String(result.sessionsFound)) },
+      { label: 'Messages found', value: palette.bold(String(result.messagesFound)) },
+    ]);
 
     if (result.warnings.length > 0) {
-      console.log(`\nWarnings (${result.warnings.length}):`);
+      console.log(
+        '\n' + palette.warning(`Warnings (${result.warnings.length}):`),
+      );
       for (const w of result.warnings.slice(0, 10)) {
-        console.log(`  - [${w.severity}] ${w.file}: ${w.message}`);
+        const severityColor = w.severity === 'error' ? palette.error : palette.warning;
+        console.log(`  ${severityColor(`[${w.severity}]`)} ${palette.muted(w.file)}: ${w.message}`);
       }
       if (result.warnings.length > 10) {
-        console.log(`  ... and ${result.warnings.length - 10} more`);
+        console.log(palette.muted(`  ... and ${result.warnings.length - 10} more`));
       }
     }
 
     if (result.errors.length > 0) {
-      console.log(`\nErrors (${result.errors.length}):`);
+      console.log('\n' + palette.error(`Errors (${result.errors.length}):`));
       for (const e of result.errors) {
-        console.log(`  - ${e}`);
+        console.log(`  ${palette.error('•')} ${e}`);
       }
     }
 
-    console.log('\nScan complete!');
+    console.log('\n' + palette.success('Scan complete!'));
   });
 
 program
@@ -197,11 +293,12 @@ program
         console.log(JSON.stringify({ agents, error: 'No supported AI agent directories found' }, null, 2));
         return;
       }
-      console.log('\nNo supported AI agent directories found.\n');
+      maybePrintBanner(options);
+      printSection('No supported AI agent directories found');
       for (const agent of agents) {
-        console.log(`  ${agent.label}: ${agent.path}`);
+        console.log(`  ${providerColor(agent.provider)(agent.label)}: ${palette.muted(agent.path)}`);
       }
-      console.log('\nInstall Codex, Claude, or Gemini CLI first, or pass --path.');
+      console.log('\n' + palette.muted('Install Codex, Claude, or Gemini CLI first, or pass --path.'));
       return;
     }
 
@@ -209,7 +306,7 @@ program
     const selectedProviders = getSelectedProviders(choice, installed, Boolean(options.path));
 
     if (selectedProviders.length === 0) {
-      console.error(`No installed agent matched "${choice}".`);
+      console.error(palette.error(`No installed agent matched "${choice}".`));
       return;
     }
 
@@ -219,31 +316,42 @@ program
       return;
     }
 
-    console.log('\nDetected AI agents:\n');
-    for (const agent of agents) {
-      const mark = agent.installed ? 'found' : 'missing';
-      console.log(`  ${agent.label.padEnd(8)} ${mark.padEnd(7)} ${agent.path}`);
-    }
+    maybePrintBanner(options);
+    printSection('Detected AI agents');
+    const agentRows = agents.map((agent) => [
+      providerColor(agent.provider)(agent.label),
+      statusBadge(agent.installed),
+      agent.hasParser ? palette.muted('parser') : palette.muted('detect-only'),
+      palette.muted(agent.path),
+    ]);
+    printTable(['Agent', 'Status', 'Parser', 'Path'], agentRows, {
+      align: ['left', 'left', 'left', 'left'],
+      maxWidths: [undefined, undefined, undefined, 40],
+      truncateStart: [false, false, false, true],
+    });
 
-    const spinner = createSpinner(`Syncing ${formatProviderList(selectedProviders)} sessions`);
+    const spinner = new Spinner(`Syncing ${formatProviderList(selectedProviders)} sessions`).start();
     try {
       const result = await syncProviders(database, config, selectedProviders, options.path);
-      spinner.stop('done');
-      console.log(`\nSynced to ${database.path}`);
-      console.log(`Files scanned: ${result.filesScanned}`);
-      console.log(`Sessions found: ${result.sessionsFound}`);
-      console.log(`Messages found: ${result.messagesFound}`);
+      spinner.stop(true);
+      console.log(palette.muted(`\nSynced to ${database.path}`));
+      infoBox('Sync results', [
+        { label: 'Files scanned', value: palette.bold(String(result.filesScanned)) },
+        { label: 'Sessions found', value: palette.bold(String(result.sessionsFound)) },
+        { label: 'Messages found', value: palette.bold(String(result.messagesFound)) },
+        {
+          label: 'Warnings',
+          value: result.warnings.length > 0 ? palette.warning(String(result.warnings.length)) : palette.muted('0'),
+        },
+      ]);
 
-      if (result.warnings.length > 0) {
-        console.log(`Warnings: ${result.warnings.length}`);
-      }
       if (result.errors.length > 0) {
-        console.log('\nErrors:');
-        for (const error of result.errors) console.log(`  - ${error}`);
+        console.log('\n' + palette.error('Errors:'));
+        for (const error of result.errors) console.log(`  ${palette.error('•')} ${error}`);
       }
     } catch (error) {
-      spinner.stop('failed');
-      console.error(error instanceof Error ? error.message : String(error));
+      spinner.stop(false);
+      console.error(palette.error(error instanceof Error ? error.message : String(error)));
     }
   });
 
@@ -310,7 +418,7 @@ statsCmd
         );
         return;
       }
-      console.log(`Exported ${data.length} rows to ${options.output}`);
+      console.log(palette.success(`Exported ${data.length} rows to ${options.output}`));
       return;
     }
 
@@ -356,7 +464,7 @@ statsCmd
         console.log(JSON.stringify({ ok: false, error: message }, null, 2));
         return;
       }
-      console.error(message);
+      console.error(palette.error(message));
       return;
     }
 
@@ -368,23 +476,33 @@ statsCmd
         return;
       }
 
-      const periodLabel = granularity === 'week' ? 'Week' : granularity === 'month' ? 'Month' : granularity === 'year' ? 'Year' : 'Date';
-      console.log('\nUsage Statistics:\n');
-      console.log(
-        periodLabel.padEnd(15) + 'Provider'.padEnd(12) + 'Sessions'.padEnd(10) + 'Tokens'.padEnd(12) + 'Cost',
-      );
-      console.log('-'.repeat(65));
+      maybePrintBanner(options);
+      printSection(`${capitalize(granularity)} Usage Statistics`);
 
-      for (const row of data) {
+      const maxTokens = Math.max(...data.map((row) => Number((row as Record<string, unknown>).totalTokens) || 0), 1);
+      const maxCost = Math.max(...data.map((row) => Number((row as Record<string, unknown>).estimatedCost) || 0), 1);
+
+      const tokenCellWidth = 8;
+      const tokenBarWidth = 12;
+      const costCellWidth = 8;
+      const costBarWidth = 10;
+
+      const rows = data.map((row) => {
         const r = row as Record<string, unknown>;
-        console.log(
-          usageRowLabel(r).padEnd(15) +
-          String(r.provider).padEnd(12) +
-          String(r.sessions).padEnd(10) +
-          formatNumber(Number(r.totalTokens) || 0).padEnd(12) +
-          formatCurrency(Number(r.estimatedCost) || 0),
-        );
-      }
+        const prov = String(r.provider);
+        const tokens = Number(r.totalTokens) || 0;
+        const cost = Number(r.estimatedCost) || 0;
+        return [
+          palette.bold(usageRowLabel(r)),
+          providerColor(prov as Provider)(prov),
+          String(r.sessions),
+          metricCell(tokens, maxTokens, formatNumber, tokenCellWidth, tokenBarWidth, providerColor(prov as Provider)),
+          metricCell(cost, maxCost, formatCurrency, costCellWidth, costBarWidth, palette.accent),
+        ];
+      });
+      printTable(['Period', 'Provider', 'Sessions', 'Tokens', 'Cost'], rows, {
+        align: ['left', 'left', 'right', 'right', 'right'],
+      });
       return;
     }
 
@@ -396,23 +514,177 @@ statsCmd
       return;
     }
 
-    console.log('\nUsage Summary:\n');
-    console.log(`Sessions:          ${summary.totalSessions}`);
-    console.log(`Prompts:           ${summary.totalPrompts}`);
-    console.log(`Input tokens:      ${formatNumber(summary.totalInputTokens)}`);
-    console.log(`Output tokens:     ${formatNumber(summary.totalOutputTokens)}`);
-    console.log(`Cached tokens:     ${formatNumber(summary.totalCachedTokens)}`);
-    console.log(`Reasoning tokens:  ${formatNumber(summary.totalReasoningTokens)}`);
-    console.log(`Total tokens:      ${formatNumber(summary.totalTokens)}`);
-    console.log(`Estimated cost:    ${formatCurrency(summary.totalEstimatedCost)}`);
-    console.log(`Most expensive model: ${summary.mostExpensiveModel}`);
-    console.log(`Most expensive day:   ${summary.mostExpensiveDay}`);
+    maybePrintBanner(options);
+    printSection('Usage Summary');
+    infoBox('Totals', [
+      { label: 'Sessions', value: palette.bold(String(summary.totalSessions)) },
+      { label: 'Prompts', value: palette.bold(String(summary.totalPrompts)) },
+      { label: 'Input tokens', value: palette.bold(formatNumber(summary.totalInputTokens)) },
+      { label: 'Output tokens', value: palette.bold(formatNumber(summary.totalOutputTokens)) },
+      { label: 'Cached tokens', value: palette.bold(formatNumber(summary.totalCachedTokens)) },
+      { label: 'Reasoning tokens', value: palette.bold(formatNumber(summary.totalReasoningTokens)) },
+      { label: 'Total tokens', value: palette.bold(formatNumber(summary.totalTokens)) },
+      { label: 'Estimated cost', value: palette.bold(formatCurrency(summary.totalEstimatedCost)) },
+      { label: 'Top model', value: summary.mostExpensiveModel },
+      { label: 'Top day', value: summary.mostExpensiveDay },
+    ]);
 
     if (summary.topProjects.length > 0) {
-      console.log('\nTop Projects:');
-      for (const p of summary.topProjects.slice(0, 5)) {
-        console.log(`  ${p.name}: ${formatCurrency(p.cost)} (${p.sessions} sessions)`);
-      }
+      const maxProjectCost = Math.max(...summary.topProjects.map((p) => p.cost), 1);
+      printSection('Top Projects');
+      const rows = summary.topProjects.slice(0, 5).map((p) => [
+        p.name,
+        formatCurrency(p.cost),
+        `${p.sessions} sessions`,
+        horizontalBar(p.cost, maxProjectCost, 20, palette.secondary),
+      ]);
+      printTable(['Project', 'Cost', 'Sessions', 'Share'], rows, {
+        align: ['left', 'right', 'right', 'left'],
+        maxWidths: [undefined, undefined, undefined, 22],
+      });
+    }
+
+    // GitHub-style activity calendar for the last 26 weeks.
+    const daily = getDailyUsage(db, { from: startOfWeeksAgo(26), to: today() });
+    const activityDays = daily.map((d) => ({ date: d.date, value: d.totalTokens ?? 0 }));
+    if (activityDays.length > 0) {
+      printSection('Activity');
+      printActivityCalendar(activityDays, { title: 'Token activity (last 26 weeks)', metric: 'tokens' });
+    }
+  });
+
+statsCmd
+  .command('activity')
+  .description('Show a GitHub-style activity calendar of daily usage')
+  .option('-w, --weeks <number>', 'Number of weeks to show', '26')
+  .option('-p, --provider <provider>', 'Filter by provider')
+  .option('-m, --metric <metric>', 'Metric to visualize: tokens, cost, sessions', 'tokens')
+  .option('--json', 'Output as JSON')
+  .action((options: {
+    weeks: string;
+    provider?: string;
+    metric?: string;
+    json?: boolean;
+  }, command) => {
+    const json = wantsJson(options, command);
+    const config = loadConfig();
+    const { db } = initializeDatabase(config.dbPath);
+    const weeks = Math.min(52, Math.max(4, parseInt(options.weeks, 10) || 26));
+    const metric: 'tokens' | 'cost' | 'sessions' =
+      options.metric === 'cost' || options.metric === 'sessions' ? options.metric : 'tokens';
+
+    const from = startOfWeeksAgo(weeks);
+    const to = today();
+    const daily = getDailyUsage(db, {
+      from,
+      to,
+      provider: options.provider as Provider | undefined,
+    });
+
+    const activityDays = daily.map((d) => ({
+      date: d.date,
+      value:
+        metric === 'cost'
+          ? d.estimatedCost ?? 0
+          : metric === 'sessions'
+            ? d.sessions ?? 0
+            : d.totalTokens ?? 0,
+    }));
+
+    if (json) {
+      console.log(JSON.stringify({ metric, weeks, from, to, days: activityDays }, null, 2));
+      return;
+    }
+
+    maybePrintBanner(options);
+    printSection('Usage Activity');
+    const providerLabel = options.provider
+      ? providerColor(options.provider as Provider)(options.provider)
+      : palette.muted('all providers');
+    console.log(`${palette.muted('Metric:')} ${palette.bold(metric)} · ${palette.muted('Provider:')} ${providerLabel}\n`);
+    printActivityCalendar(activityDays, {
+      title: `${capitalize(metric)} activity (last ${weeks} weeks)`,
+      metric,
+      weeks,
+      color: metric === 'cost' ? palette.accent : metric === 'sessions' ? palette.secondary : palette.primary,
+    });
+  });
+
+// Activity command (top-level alias for stats activity)
+program
+  .command('activity')
+  .description('Show a GitHub-style activity calendar of daily usage')
+  .option('-w, --weeks <number>', 'Number of weeks to show', '26')
+  .option('-p, --provider <provider>', 'Filter by provider')
+  .option('-m, --metric <metric>', 'Metric to visualize: tokens, cost, sessions', 'tokens')
+  .option('--json', 'Output as JSON')
+  .action((options: {
+    weeks: string;
+    provider?: string;
+    metric?: string;
+    json?: boolean;
+  }, command) => {
+    const json = wantsJson(options, command);
+    const config = loadConfig();
+    const { db } = initializeDatabase(config.dbPath);
+    const weeks = Math.min(52, Math.max(4, parseInt(options.weeks, 10) || 26));
+    const metric: 'tokens' | 'cost' | 'sessions' =
+      options.metric === 'cost' || options.metric === 'sessions' ? options.metric : 'tokens';
+
+    const from = startOfWeeksAgo(weeks);
+    const to = today();
+    const daily = getDailyUsage(db, {
+      from,
+      to,
+      provider: options.provider as Provider | undefined,
+    });
+
+    const activityDays = daily.map((d) => ({
+      date: d.date,
+      value:
+        metric === 'cost'
+          ? d.estimatedCost ?? 0
+          : metric === 'sessions'
+            ? d.sessions ?? 0
+            : d.totalTokens ?? 0,
+    }));
+
+    if (json) {
+      console.log(JSON.stringify({ metric, weeks, from, to, days: activityDays }, null, 2));
+      return;
+    }
+
+    maybePrintBannerAnimated(options);
+    printSection('Usage Activity');
+    const providerLabel = options.provider
+      ? providerColor(options.provider as Provider)(options.provider)
+      : palette.muted('all providers');
+    console.log(
+      `${palette.muted('Metric:')} ${palette.bold(metric)} · ${palette.muted('Provider:')} ${providerLabel}\n`,
+    );
+    printActivityCalendar(activityDays, {
+      title: `${capitalize(metric)} activity (last ${weeks} weeks)`,
+      metric,
+      weeks,
+      color:
+        metric === 'cost'
+          ? palette.accent
+          : metric === 'sessions'
+            ? palette.secondary
+            : palette.primary,
+    });
+  });
+
+// Logo command — print the animated brand mark.
+program
+  .command('logo')
+  .description('Display the AgentUsageStats logo')
+  .option('--no-animate', 'Skip the animation')
+  .action(async (options: { animate: boolean }) => {
+    if (options.animate && isInteractive()) {
+      await printLogoAnimated();
+    } else {
+      printLogo();
     }
   });
 
@@ -429,7 +701,7 @@ program
     const { db } = initializeDatabase(config.dbPath);
 
     if (!options.search) {
-      console.log('Please provide a search query with --search');
+      console.log(palette.warning('Please provide a search query with --search'));
       return;
     }
 
@@ -443,20 +715,21 @@ program
       return;
     }
 
-    console.log(`\nPrompts matching "${options.search}":\n`);
-    console.log('Time'.padEnd(22) + 'Provider'.padEnd(12) + 'Role'.padEnd(10) + 'Preview');
-    console.log('-'.repeat(80));
+    maybePrintBanner(options);
+    printSection(`Prompts matching "${options.search}"`);
 
-    for (const r of results) {
-      console.log(
-        (r.timestamp || 'N/A').padEnd(22) +
-        r.provider.padEnd(12) +
-        r.role.padEnd(10) +
-        r.contentPreview.slice(0, 40)
-      );
-    }
+    const rows = results.map((r) => [
+      palette.muted(r.timestamp || 'N/A'),
+      providerColor(r.provider as Provider)(r.provider),
+      r.role,
+      r.contentPreview.slice(0, 50),
+    ]);
+    printTable(['Time', 'Provider', 'Role', 'Preview'], rows, {
+      align: ['left', 'left', 'left', 'left'],
+      maxWidths: [undefined, undefined, undefined, 50],
+    });
 
-    console.log(`\nTotal: ${results.length} results`);
+    console.log('\n' + palette.muted(`Total: ${results.length} results`));
   });
 
 // Sessions commands
@@ -528,17 +801,30 @@ program
       return;
     }
 
+    maybePrintBanner(options);
+    printSection('Parser warnings');
+
     if (warnings.length === 0) {
-      console.log('No parser warnings recorded.');
+      console.log(palette.muted('No parser warnings recorded.'));
       return;
     }
 
-    console.log('\nParser warnings:\n');
-    for (const w of warnings) {
-      const code = w.code ? `[${w.code}] ` : '';
-      const line = w.line != null ? `:${w.line}` : '';
-      console.log(`  ${w.severity} ${code}${w.file}${line} — ${w.message}`);
-    }
+    const rows = warnings.map((w) => {
+      const severityColor = w.severity === 'error' ? palette.error : palette.warning;
+      const code = w.code ? palette.muted(`[${w.code}]`) : '';
+      const line = w.line != null ? palette.muted(`:${w.line}`) : '';
+      return [
+        severityColor(w.severity),
+        code,
+        `${palette.muted(w.file)}${line}`,
+        w.message,
+      ];
+    });
+    printTable(['Severity', 'Code', 'File', 'Message'], rows, {
+      align: ['left', 'left', 'left', 'left'],
+      maxWidths: [undefined, undefined, 36, 48],
+      truncateStart: [false, false, true, false],
+    });
   });
 
 // Pricing commands
@@ -578,19 +864,17 @@ pricingCmd
       return;
     }
 
-    console.log('\nPricing Models:\n');
-    console.log('Provider'.padEnd(12) + 'Model'.padEnd(25) + 'Input/M'.padEnd(12) + 'Output/M'.padEnd(12) + 'Cached/M');
-    console.log('-'.repeat(75));
+    maybePrintBanner(options);
+    printSection('Pricing Models');
 
-    for (const m of models) {
-      console.log(
-        m.provider.padEnd(12) +
-        m.model.padEnd(25) +
-        formatCurrency(m.inputPerMillion).padEnd(12) +
-        formatCurrency(m.outputPerMillion).padEnd(12) +
-        (m.cachedInputPerMillion ? formatCurrency(m.cachedInputPerMillion) : 'N/A')
-      );
-    }
+    const rows = models.map((m) => [
+      providerColor(m.provider as Provider)(m.provider),
+      m.model,
+      formatCurrency(m.inputPerMillion),
+      formatCurrency(m.outputPerMillion),
+      m.cachedInputPerMillion ? formatCurrency(m.cachedInputPerMillion) : palette.muted('N/A'),
+    ]);
+    printTable(['Provider', 'Model', 'Input/M', 'Output/M', 'Cached/M'], rows);
   });
 
 pricingCmd
@@ -642,14 +926,14 @@ pricingCmd
         console.log(JSON.stringify({ ok: true, imported, file }, null, 2));
         return;
       }
-      console.log(`Imported ${imported} pricing models`);
+      console.log(palette.success(`Imported ${imported} pricing models`));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       if (options.json) {
         console.log(JSON.stringify({ ok: false, error: message }, null, 2));
         return;
       }
-      console.error(`Failed to import: ${message}`);
+      console.error(palette.error(`Failed to import: ${message}`));
     }
   });
 
@@ -671,7 +955,7 @@ pricingCmd
         console.log(JSON.stringify({ exported: models.length, path: options.output }, null, 2));
         return;
       }
-      console.log(`Exported ${models.length} pricing models to ${options.output}`);
+      console.log(palette.success(`Exported ${models.length} pricing models to ${options.output}`));
     } else if (options.json) {
       console.log(json);
     } else {
@@ -703,9 +987,13 @@ privacyCmd
       console.log(JSON.stringify(payload, null, 2));
       return;
     }
-    console.log(`\nPrivacy mode: ${mode}`);
-    console.log(`Store raw records: ${config.storeRawRecords}`);
-    console.log(`Estimate prompt-only sources: ${payload.estimatePromptOnlySources}`);
+    maybePrintBanner(options);
+    printSection('Privacy settings');
+    infoBox('Status', [
+      { label: 'Privacy mode', value: privacyModeColor(mode) },
+      { label: 'Store raw records', value: config.storeRawRecords ? palette.success('yes') : palette.muted('no') },
+      { label: 'Estimate prompt-only sources', value: payload.estimatePromptOnlySources ? palette.success('yes') : palette.muted('no') },
+    ]);
   });
 
 privacyCmd
@@ -731,7 +1019,7 @@ privacyCmd
       console.log(JSON.stringify({ ok: true, privacyMode: mode }, null, 2));
       return;
     }
-    console.log(`Privacy mode set to: ${mode}`);
+    console.log(palette.success(`Privacy mode set to: ${privacyModeColor(mode)}`));
   });
 
 privacyCmd
@@ -749,10 +1037,14 @@ privacyCmd
       return;
     }
 
-    console.log(`Purged content from ${result.messages} message row(s).`);
-    console.log(`Cleared metadata from ${result.sessions} session row(s).`);
-    console.log(`Removed ${result.fts} full-text search entr${result.fts === 1 ? 'y' : 'ies'}.`);
-    console.log('Content purged successfully.');
+    maybePrintBanner(options);
+    printSection('Privacy purge');
+    infoBox('Purged content', [
+      { label: 'Message rows', value: palette.bold(String(result.messages)) },
+      { label: 'Session rows', value: palette.bold(String(result.sessions)) },
+      { label: 'FTS entries', value: palette.bold(String(result.fts)) },
+    ]);
+    console.log('\n' + palette.success('Content purged successfully.'));
   });
 
 // Watch command
@@ -769,7 +1061,9 @@ program
     };
 
     if (!options.json) {
-      console.log('Watching for session changes... (Press Ctrl+C to stop)');
+      maybePrintBanner(options);
+      printSection('Watch mode');
+      console.log(palette.muted('Watching for session changes... (Press Ctrl+C to stop)'));
     } else {
       emit({ event: 'watch_started', provider: options.provider ?? null });
     }
@@ -798,7 +1092,7 @@ program
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
         if (!options.json) {
-          console.log(`Change detected: ${filePath}`);
+          console.log(`${palette.accent('→')} Change detected: ${palette.muted(filePath)}`);
         } else {
           emit({ event: 'file_changed', kind, path: filePath });
         }
@@ -848,8 +1142,10 @@ program
     const url = `http://${host}:${port}`;
 
     if (!options.json) {
+      maybePrintBanner(options);
+      printSection('Dashboard');
       const mode = target.kind === 'production' ? 'production build' : 'dev server';
-      console.log(`Starting dashboard (${mode}) on ${url} ...`);
+      console.log(`${palette.accent('→')} Starting dashboard (${palette.muted(mode)}) on ${palette.bold.underline(url)} ...`);
     }
 
     const child =
@@ -900,25 +1196,26 @@ const providersCmd = program
       return;
     }
 
-    console.log('\nProviders:\n');
+    maybePrintBanner(options);
+    printSection('Providers');
+
+    const rows = agents.map((agent) => [
+      providerColor(agent.provider)(agent.label),
+      statusBadge(agent.installed),
+      agent.hasParser ? palette.success('yes') : palette.muted('no'),
+      supportBadge(agent.supportLevel),
+      palette.muted(agent.path),
+    ]);
+    printTable(['Provider', 'Status', 'Parser', 'Support', 'Path'], rows, {
+      align: ['left', 'left', 'left', 'left', 'left'],
+      maxWidths: [undefined, undefined, undefined, undefined, 40],
+      truncateStart: [false, false, false, false, true],
+    });
+
+    const detected = agents.filter((a) => a.installed).length;
     console.log(
-      'Provider'.padEnd(22) +
-        'Status'.padEnd(12) +
-        'Parser'.padEnd(8) +
-        'Support'.padEnd(22) +
-        'Path',
+      '\n' + palette.muted(`${detected} of ${agents.length} providers detected.`),
     );
-    console.log('-'.repeat(96));
-    for (const agent of agents) {
-      console.log(
-        agent.label.padEnd(22) +
-          (agent.installed ? 'detected' : 'not found').padEnd(12) +
-          (agent.hasParser ? 'yes' : 'no').padEnd(8) +
-          agent.supportLevel.padEnd(22) +
-          agent.path,
-      );
-    }
-    console.log(`\n${agents.filter((a) => a.installed).length} of ${agents.length} providers detected.`);
   });
 
 providersCmd
@@ -935,12 +1232,17 @@ providersCmd
       return;
     }
 
+    maybePrintBanner(options);
+    printSection('Detected providers');
+
     if (installed.length === 0) {
-      console.log('No providers detected.');
+      console.log(palette.muted('No providers detected.'));
       return;
     }
     for (const agent of installed) {
-      console.log(`${agent.label} (${agent.provider}) - ${agent.path}`);
+      console.log(
+        `${providerColor(agent.provider)('●')} ${palette.bold(agent.label)} (${palette.muted(agent.provider)}) - ${palette.muted(agent.path)}`,
+      );
     }
   });
 
@@ -955,14 +1257,14 @@ program
     const provider = options.provider as string;
     const def = getProviderDefinition(provider);
     if (!def) {
-      console.error(`Unknown provider "${provider}".`);
+      console.error(palette.error(`Unknown provider "${provider}".`));
       return;
     }
 
     const dbFile = options.file || findSqliteFile(provider);
     if (!dbFile) {
       console.error(
-        `No SQLite database found for ${def.label}. Pass --file, or check ${def.detectDirs.join(', ')}.`,
+        palette.error(`No SQLite database found for ${def.label}. Pass --file, or check ${def.detectDirs.join(', ')}.`),
       );
       return;
     }
@@ -991,17 +1293,19 @@ program
         return;
       }
 
-      console.log(`\nSchema for ${def.label} (${dbFile}):\n`);
+      maybePrintBanner(options);
+      printSection(`Schema for ${def.label}`);
+      console.log(palette.muted(dbFile) + '\n');
       for (const t of schema) {
-        const flag = t.likelyUsageTable ? '  <- likely usage table' : '';
-        console.log(`Table: ${t.table}${flag}`);
+        const flag = t.likelyUsageTable ? palette.accent('  ← likely usage table') : '';
+        console.log(`${palette.bold('Table:')} ${palette.primary(t.table)}${flag}`);
         for (const c of t.columns) {
-          console.log(`    ${c.name} ${c.type}`);
+          console.log(`  ${palette.bold(c.name)} ${palette.muted(c.type)}`);
         }
         console.log('');
       }
     } catch (e) {
-      console.error(`Failed to inspect: ${e instanceof Error ? e.message : String(e)}`);
+      console.error(palette.error(`Failed to inspect: ${e instanceof Error ? e.message : String(e)}`));
     } finally {
       sqlite?.close();
     }
@@ -1047,7 +1351,7 @@ program
     if (options.provider) {
       const def = getProviderDefinition(options.provider);
       if (!def) {
-        console.error(`Unknown provider "${options.provider}".`);
+        console.error(palette.error(`Unknown provider "${options.provider}".`));
         return;
       }
       const guidance = providerGuidance(def.id);
@@ -1055,8 +1359,9 @@ program
         console.log(JSON.stringify({ provider: def.id, label: def.label, guidance }, null, 2));
         return;
       }
-      console.log(`\n${def.label} setup\n`);
-      for (const line of guidance) console.log(`  ${line}`);
+      maybePrintBanner(options);
+      printSection(`${def.label} setup`);
+      for (const line of guidance) console.log(`  ${palette.info('•')} ${line}`);
       return;
     }
 
@@ -1076,26 +1381,40 @@ program
       return;
     }
 
-    console.log('\nSystem Health Check:\n');
-    console.log(`Node.js: ${nodeVersion} ${nodeOk ? '✓' : '✗ (v20+ required)'}`);
-    console.log(`Database: ${dbOk ? `${dbPath} ✓` : '✗ failed to open'}`);
-    if (configValidation.path) {
-      console.log(
-        `Config (${configValidation.path}): ${configValidation.ok ? '✓ valid' : '✗ invalid'}`,
-      );
-      if (configValidation.errors?.length) {
-        for (const err of configValidation.errors) {
-          console.log(`  - ${err}`);
-        }
+    maybePrintBanner(options);
+    printSection('System Health Check');
+
+    const nodeStatus = nodeOk ? palette.success('ok') : palette.error('v20+ required');
+    const dbStatus = dbOk ? palette.success('ok') : palette.error('failed to open');
+    const configStatus = configValidation.ok
+      ? palette.success('valid')
+      : palette.error('invalid');
+
+    infoBox('Health', [
+      { label: 'Node.js', value: `${palette.muted(nodeVersion)} ${nodeStatus}` },
+      { label: 'Database', value: dbOk ? `${palette.muted(dbPath)} ${dbStatus}` : dbStatus },
+      {
+        label: 'Config',
+        value: configValidation.path
+          ? `${palette.muted(configValidation.path)} ${configStatus}`
+          : palette.muted('using defaults'),
+      },
+    ]);
+
+    if (configValidation.path && configValidation.errors?.length) {
+      console.log('\n' + palette.error('Config errors:'));
+      for (const err of configValidation.errors) {
+        console.log(`  ${palette.error('•')} ${err}`);
       }
-    } else {
-      console.log('Config: using defaults (no config file found)');
     }
-    console.log('\nProviders:');
+
+    printSection('Providers');
     for (const a of providerReport) {
-      console.log(`  ${a.label.padEnd(18)} ${a.installed ? 'detected' : 'not found'}`);
+      const icon = a.installed ? palette.success('●') : palette.muted('○');
+      const status = a.installed ? palette.success('detected') : palette.muted('not found');
+      console.log(`  ${icon} ${a.label.padEnd(18)} ${status}`);
     }
-    console.log('\nHealth check complete');
+    console.log('\n' + palette.success('Health check complete'));
   });
 
 // Seed command for demo mode
@@ -1109,8 +1428,10 @@ program
     const { sqlite } = initializeDatabase(config.dbPath);
 
     const count = parseInt(options.sessions, 10);
+    let spinner: Spinner | undefined;
     if (!options.json) {
-      console.log(`Generating ${count} sample sessions...`);
+      maybePrintBanner(options);
+      spinner = new Spinner(`Generating ${count} sample sessions`).start();
     }
 
     // Generate sample data
@@ -1148,11 +1469,12 @@ program
     }
 
     refreshUsageRollups(sqlite);
+    spinner?.stop(true);
     if (options.json) {
       console.log(JSON.stringify({ ok: true, sessionsGenerated: count }, null, 2));
       return;
     }
-    console.log(`Generated ${count} sample sessions`);
+    console.log(palette.success(`Generated ${count} sample sessions`));
   });
 
 /** Walk up from the CLI location to find the monorepo root (has pnpm-workspace.yaml). */
@@ -1330,36 +1652,6 @@ function formatProviderList(providers: Provider[]) {
 
 function providerDisplayName(provider: Provider): string {
   return getProviderDefinition(provider)?.label ?? provider;
-}
-
-function createSpinner(label: string) {
-  const frames = ['-', '\\', '|', '/'];
-  let frame = 0;
-  let active = process.stdout.isTTY;
-
-  if (!active) {
-    console.log(`${label}...`);
-    return {
-      stop(status: string) {
-        console.log(`${label}: ${status}`);
-      },
-    };
-  }
-
-  process.stdout.write('\x1b[?25l');
-  const timer = setInterval(() => {
-    process.stdout.write(`\r${frames[frame]} ${label}...`);
-    frame = (frame + 1) % frames.length;
-  }, 90);
-
-  return {
-    stop(status: string) {
-      clearInterval(timer);
-      process.stdout.write(`\r\x1b[K${label}: ${status}\n`);
-      process.stdout.write('\x1b[?25h');
-      active = false;
-    },
-  };
 }
 
 program.parse();
