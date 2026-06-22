@@ -9,6 +9,6 @@
     "typecheck": "node -e \"console.log('Desktop typecheck: run cargo check in src-tauri when Rust toolchain is installed')\""
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.2.0"
+    "@tauri-apps/cli": "^2.11.3"
   }
 }
