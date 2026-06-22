@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
 import { providerLabel } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 
@@ -29,7 +30,6 @@ export function ScanButton({ variant = 'default', onComplete }: ScanButtonProps)
   );
   const [agents, setAgents] = useState<AgentInstallation[]>([]);
   const [selected, setSelected] = useState<SyncTarget>('all');
-  const [result, setResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const router = useRouter();
 
@@ -73,16 +73,14 @@ export function ScanButton({ variant = 'default', onComplete }: ScanButtonProps)
           setLoading(false);
           setProgress(null);
           if (run.status === 'completed') {
-            setResult({
-              type: 'success',
-              message: `Synced ${run.sessionsFound} sessions from ${run.filesScanned} files`,
+            toast.success('Sync complete', {
+              description: `${run.sessionsFound} sessions from ${run.filesScanned} files`,
             });
             router.refresh();
             onComplete?.();
           } else {
-            setResult({ type: 'error', message: run.errors || 'Scan failed' });
+            toast.error('Scan failed', { description: run.errors || undefined });
           }
-          setTimeout(() => setResult(null), 5000);
         }
       } catch {
         // keep polling
@@ -92,7 +90,6 @@ export function ScanButton({ variant = 'default', onComplete }: ScanButtonProps)
 
   const handleScan = async () => {
     setLoading(true);
-    setResult(null);
     setProgress(null);
     try {
       const res = await fetch('/api/scan', {
@@ -102,22 +99,20 @@ export function ScanButton({ variant = 'default', onComplete }: ScanButtonProps)
       });
       const data = await res.json();
       if (data.error) {
-        setResult({ type: 'error', message: data.error });
+        toast.error('Scan failed', { description: data.error });
         setLoading(false);
       } else if (data.runId) {
         pollScanStatus(data.runId);
       } else {
-        setResult({
-          type: 'success',
-          message: `Synced ${data.sessionsFound ?? 0} sessions`,
+        toast.success('Sync complete', {
+          description: `${data.sessionsFound ?? 0} sessions`,
         });
         setLoading(false);
         router.refresh();
         onComplete?.();
-        setTimeout(() => setResult(null), 5000);
       }
     } catch (e) {
-      setResult({ type: 'error', message: e instanceof Error ? e.message : String(e) });
+      toast.error('Scan failed', { description: e instanceof Error ? e.message : undefined });
       setLoading(false);
     }
   };
@@ -169,17 +164,6 @@ export function ScanButton({ variant = 'default', onComplete }: ScanButtonProps)
           {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
           {loading ? 'Syncing…' : syncButtonLabel(selected, installedAgents)}
         </Button>
-        {result && (
-          <span
-            className={`max-w-72 text-xs ${
-              result.type === 'error'
-                ? 'text-red-600 dark:text-red-400'
-                : 'text-emerald-600 dark:text-emerald-400'
-            }`}
-          >
-            {result.message}
-          </span>
-        )}
       </div>
 
       {loading && (

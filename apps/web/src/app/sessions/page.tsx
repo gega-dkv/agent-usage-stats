@@ -1,15 +1,19 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Search } from 'lucide-react';
-import { formatNumber, formatCurrency, formatDate, providerLabel, providerBadge } from '@/lib/format';
+import { Suspense, useMemo } from 'react';
+import Link from 'next/link';
+import { Search, ArrowUp, ArrowDown, MessageSquare } from 'lucide-react';
 import { listProviderIds, getProviderDefinition } from '@agent-usage/shared';
+import { useQuery } from '@/lib/use-query';
+import { fetchJson } from '@/lib/fetcher';
+import { useUrlFilters } from '@/lib/use-filters';
+import { formatNumber, formatCurrency, formatDate } from '@/lib/format';
 import { ScanButton } from '@/components/scan-button';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select,
   SelectContent,
@@ -25,6 +29,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { ProviderBadge, ConfidenceBadge } from '@/components/provider-badge';
+import { cn } from '@/lib/utils';
 
 type Session = {
   id: string;
@@ -46,96 +52,106 @@ type Session = {
   tokenUsageEstimated?: boolean;
 };
 
+type SortField = 'date' | 'cost' | 'tokens' | 'provider' | 'model';
+type SortDir = 'asc' | 'desc';
+
+const DEFAULTS = { sort: 'date' as SortField, dir: 'desc' as SortDir, provider: 'all', q: '' };
+
+const SORT_LABELS: Record<SortField, string> = {
+  date: 'Date',
+  cost: 'Cost',
+  tokens: 'Tokens',
+  provider: 'Provider',
+  model: 'Model',
+};
+
 export default function SessionsPage() {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [sortField, setSortField] = useState<'date' | 'cost' | 'tokens' | 'provider' | 'model'>('date');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [providerFilter, setProviderFilter] = useState<string>('all');
-  const [search, setSearch] = useState('');
+  // useSearchParams (via useUrlFilters) requires a Suspense boundary for static prerender.
+  return (
+    <Suspense fallback={<Skeleton className="h-96 w-full rounded-xl" />}>
+      <SessionsContent />
+    </Suspense>
+  );
+}
 
-  const providerOptions = listProviderIds().map((id) => ({
-    id,
-    label: getProviderDefinition(id)?.label ?? id,
-  }));
+function SessionsContent() {
+  const { filters, setFilter } = useUrlFilters(DEFAULTS);
+  const sortField = filters.sort as SortField;
+  const sortDirection = filters.dir as SortDir;
+  const providerFilter = filters.provider;
+  const search = filters.q;
+  const setSearch = (v: string) => setFilter('q', v);
 
-  const fetchSessions = () => {
-    setLoading(true);
-    fetch(`/api/sessions?limit=200&orderBy=${sortField}`)
-      .then((r) => r.json())
-      .then((d) => {
-        setSessions(d.sessions || []);
-        setLoading(false);
+  const providerOptions = useMemo(
+    () => listProviderIds().map((id) => ({ id, label: getProviderDefinition(id)?.label ?? id })),
+    [],
+  );
+
+  // Fetch ordered by the sort field; client-side filtering on provider + search.
+  const { data, loading } = useQuery<{ sessions: Session[] }>(
+    `/api/sessions?limit=200&orderBy=${sortField}`,
+    { fetcher: (key) => fetchJson(key) },
+  );
+
+  const sessions = data?.sessions ?? [];
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return sessions
+      .filter((s) => providerFilter === 'all' || s.provider === providerFilter)
+      .filter((s) => {
+        if (!q) return true;
+        return (
+          s.id.toLowerCase().includes(q) ||
+          s.projectName?.toLowerCase().includes(q) ||
+          s.model?.toLowerCase().includes(q)
+        );
       })
-      .catch(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    fetchSessions();
-  }, [sortField]);
-
-  const filtered = sessions
-    .filter((s) => providerFilter === 'all' || s.provider === providerFilter)
-    .filter((s) => {
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return (
-        s.id.toLowerCase().includes(q) ||
-        s.projectName?.toLowerCase().includes(q) ||
-        s.model?.toLowerCase().includes(q)
-      );
-    })
-    .sort((a, b) => {
-      const dir = sortDirection === 'asc' ? 1 : -1;
-      if (sortField === 'date') {
-        return ((a.updatedAt || '').localeCompare(b.updatedAt || '') * dir);
-      }
-      if (sortField === 'cost') {
-        return (a.estimatedCost - b.estimatedCost) * dir;
-      }
-      if (sortField === 'provider') {
-        return a.provider.localeCompare(b.provider) * dir;
-      }
-      if (sortField === 'model') {
-        return (a.model || '').localeCompare(b.model || '') * dir;
-      }
-      return (a.totalTokens - b.totalTokens) * dir;
-    });
+      .sort((a, b) => {
+        const dir = sortDirection === 'asc' ? 1 : -1;
+        if (sortField === 'date') return (a.updatedAt || '').localeCompare(b.updatedAt || '') * dir;
+        if (sortField === 'cost') return (a.estimatedCost - b.estimatedCost) * dir;
+        if (sortField === 'provider') return a.provider.localeCompare(b.provider) * dir;
+        if (sortField === 'model') return (a.model || '').localeCompare(b.model || '') * dir;
+        return (a.totalTokens - b.totalTokens) * dir;
+      });
+  }, [sessions, providerFilter, search, sortField, sortDirection]);
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Sessions</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h2 className="text-xl font-bold tracking-tight">Sessions</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
             {filtered.length} of {sessions.length} sessions
           </p>
         </div>
         <ScanButton variant="compact" />
       </div>
 
-      <Card className="p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Search className="size-4 text-muted-foreground" />
-            <Input
-              type="text"
-              placeholder="Search sessions…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-48"
-            />
-          </div>
-          <div className="h-6 w-px bg-border" />
+      <Card className="p-3">
+        <div className="flex flex-wrap items-end gap-3">
           <div className="flex flex-col gap-1">
-            <Label className="text-xs text-muted-foreground">Provider</Label>
-            <Select value={providerFilter} onValueChange={setProviderFilter}>
-              <SelectTrigger className="w-[140px]">
+            <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Search</Label>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Project, model, id…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-56 pl-8"
+              />
+            </div>
+          </div>
+          <div className="h-6 w-px self-end bg-border" />
+          <FilterField label="Provider">
+            <Select value={providerFilter} onValueChange={(v) => setFilter('provider', v)}>
+              <SelectTrigger className="w-[160px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="all">All providers</SelectItem>
                 {providerOptions.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.label}
@@ -143,119 +159,147 @@ export default function SessionsPage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </FilterField>
           <div className="ml-auto flex items-end gap-2">
-            <div className="flex flex-col gap-1">
-              <Label className="text-xs text-muted-foreground">Sort</Label>
-              <Select value={sortField} onValueChange={(v) => setSortField(v as typeof sortField)}>
+            <FilterField label="Sort">
+              <Select value={sortField} onValueChange={(v) => setFilter('sort', v)}>
                 <SelectTrigger className="w-[120px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="date">Date</SelectItem>
-                  <SelectItem value="cost">Cost</SelectItem>
-                  <SelectItem value="tokens">Tokens</SelectItem>
-                  <SelectItem value="provider">Provider</SelectItem>
-                  <SelectItem value="model">Model</SelectItem>
+                  {(Object.keys(SORT_LABELS) as SortField[]).map((f) => (
+                    <SelectItem key={f} value={f}>
+                      {SORT_LABELS[f]}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
-            </div>
+            </FilterField>
             <Button
               variant="outline"
               size="icon"
-              onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
-              title="Toggle sort direction"
+              onClick={() => setFilter('dir', sortDirection === 'asc' ? 'desc' : 'asc')}
+              title={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'}`}
             >
-              {sortDirection === 'asc' ? '↑' : '↓'}
+              {sortDirection === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
             </Button>
           </div>
         </div>
       </Card>
 
-      {/* Table */}
       {loading ? (
-        <div className="space-y-2">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-16 animate-pulse rounded-xl bg-muted" />
-          ))}
-        </div>
+        <SessionsSkeleton />
       ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border-2 border-dashed border-border bg-card/50 p-12 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-          </div>
-          <h3 className="mt-4 font-semibold">No sessions found</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Run a scan to import session data.
-          </p>
-        </div>
+        <SessionsEmpty hasAny={sessions.length > 0} />
       ) : (
-        <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Provider</TableHead>
-                <TableHead>Project</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead>Updated</TableHead>
-                <TableHead className="text-right">Input</TableHead>
-                <TableHead className="text-right">Output</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead>Quality</TableHead>
-                <TableHead className="text-right">Cost</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((s) => (
-                <TableRow
-                  key={s.id}
-                  className="cursor-pointer"
-                  onClick={() => {
-                    window.location.href = `/sessions/${encodeURIComponent(s.id)}`;
-                  }}
-                >
-                  <TableCell>
-                    <Badge variant="outline" className={providerBadge(s.provider)}>
-                      {providerLabel(s.provider)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-medium">
-                    {s.projectName || <span className="text-muted-foreground">—</span>}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {s.model || '—'}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{formatDate(s.updatedAt)}</TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {formatNumber(s.inputTokens)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs">
-                    {formatNumber(s.outputTokens)}
-                  </TableCell>
-                  <TableCell className="text-right font-mono font-semibold">
-                    {formatNumber(s.totalTokens)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {s.supportLevel ? <Badge variant="secondary">{s.supportLevel}</Badge> : null}
-                      {s.usageConfidence ? (
-                        <Badge variant="secondary">{s.usageConfidence}</Badge>
-                      ) : null}
-                      {s.costEstimated ? <Badge variant="outline">est. cost</Badge> : null}
-                      {s.tokenUsageEstimated ? <Badge variant="outline">est. tokens</Badge> : null}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right font-mono font-semibold">
-                    {formatCurrency(s.estimatedCost)}
-                  </TableCell>
+        <Card className="overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="pl-5">Provider</TableHead>
+                  <TableHead>Project</TableHead>
+                  <TableHead>Model</TableHead>
+                  <TableHead>Updated</TableHead>
+                  <TableHead className="text-right">Input</TableHead>
+                  <TableHead className="text-right">Output</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead>Quality</TableHead>
+                  <TableHead className="pr-5 text-right">Cost</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((s) => (
+                  <TableRow key={s.id} className="group">
+                    <TableCell className="pl-5">
+                      <ProviderBadge provider={s.provider} />
+                    </TableCell>
+                    <TableCell>
+                      <Link
+                        href={`/sessions/${encodeURIComponent(s.id)}`}
+                        className="block max-w-[180px] truncate font-medium hover:text-primary"
+                        title={s.projectName || s.id}
+                      >
+                        {s.projectName || <span className="text-muted-foreground">—</span>}
+                      </Link>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{s.model || '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                      {formatDate(s.updatedAt)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs nums text-muted-foreground">
+                      {formatNumber(s.inputTokens)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs nums text-muted-foreground">
+                      {formatNumber(s.outputTokens)}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs nums font-semibold">
+                      {formatNumber(s.totalTokens)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {s.usageConfidence && <ConfidenceBadge confidence={s.usageConfidence} />}
+                        {s.costEstimated && (
+                          <span className="rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                            est. $
+                          </span>
+                        )}
+                        {s.tokenUsageEstimated && (
+                          <span className="rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                            est. tok
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="pr-5 text-right font-mono text-xs nums font-semibold">
+                      {formatCurrency(s.estimatedCost)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </Card>
       )}
     </div>
+  );
+}
+
+function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function SessionsSkeleton() {
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex flex-col">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} className={cn('m-2 h-12', i === 0 && 'mt-3')} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function SessionsEmpty({ hasAny }: { hasAny: boolean }) {
+  return (
+    <Card className="border-dashed">
+      <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+          <MessageSquare className="h-5 w-5" />
+        </div>
+        <h3 className="mt-4 text-sm font-semibold">{hasAny ? 'No matching sessions' : 'No sessions yet'}</h3>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+          {hasAny
+            ? 'Try adjusting your search or filters.'
+            : 'Run a sync to import session data from your installed agents.'}
+        </p>
+      </div>
+    </Card>
   );
 }

@@ -11,6 +11,41 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Compute the date range for the "previous period" — the equal-length window
+ * immediately before the current `from`. Used to power trend deltas on KPI cards.
+ */
+function previousRange(range: TimeRange, from?: string, to?: string): { from?: string; to?: string } {
+  if (!from) return {};
+  const startMs = new Date(from).getTime();
+  if (Number.isNaN(startMs)) return {};
+  const endMs = to ? new Date(to).getTime() : Date.now();
+  const spanMs = Math.max(0, endMs - startMs);
+
+  if (range === 'custom') {
+    return { from: new Date(startMs - spanMs).toISOString(), to: new Date(startMs).toISOString() };
+  }
+
+  // Mirror resolveDateRange's offsets to compute the prior window start.
+  const prevStart = new Date(startMs);
+  const prevTo = new Date(startMs);
+  switch (range) {
+    case 'day':
+      prevStart.setUTCDate(prevStart.getUTCDate() - 1);
+      break;
+    case 'week':
+      prevStart.setUTCDate(prevStart.getUTCDate() - 7);
+      break;
+    case 'month':
+      prevStart.setUTCDate(prevStart.getUTCDate() - 30);
+      break;
+    case 'year':
+      prevStart.setUTCFullYear(prevStart.getUTCFullYear() - 1);
+      break;
+  }
+  return { from: prevStart.toISOString(), to: prevTo.toISOString() };
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -103,8 +138,19 @@ export async function GET(request: Request) {
     const metadataOnlyCount = summary.sessionsByUsageConfidence?.['metadata-only'] ?? 0;
     const unavailableCount = summary.sessionsByUsageConfidence?.unavailable ?? 0;
 
+    // Previous-period summary for trend deltas on KPI cards. Backward-compatible:
+    // omitted entirely on error rather than failing the whole request.
+    let previousSummary: typeof summary | undefined;
+    try {
+      const prev = previousRange(range, from, to);
+      if (prev.from) previousSummary = getStatsSummary(database.db, prev);
+    } catch {
+      previousSummary = undefined;
+    }
+
     return NextResponse.json({
       summary,
+      previousSummary,
       timeSeries,
       grouped,
       costByModel,

@@ -1,7 +1,32 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { formatCurrency, formatDateTime } from '@/lib/format';
+import { Suspense, useState } from 'react';
+import { Plus, Copy, Check, X, Pencil } from 'lucide-react';
+import { toast } from 'sonner';
+import { useQuery, mutateCache, invalidateCache } from '@/lib/use-query';
+import { fetchJson } from '@/lib/fetcher';
+import { useUrlFilters } from '@/lib/use-filters';
+import { formatCurrency, formatRelativeTime } from '@/lib/format';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 type Model = {
   id: number;
@@ -18,19 +43,32 @@ type Model = {
   updatedAt?: string;
 };
 
-const PROFILES = [
-  'api-standard',
-  'api-batch',
-  'subscription-equivalent',
-  'custom',
-];
+type PricingResponse = { models: Model[]; profiles: string[]; lastUpdated?: string };
+
+const DEFAULT_PROFILES = ['api-standard', 'subscription-equivalent', 'custom'];
+const NUMBER_STEP = 0.01;
 
 export default function PricingPage() {
-  const [models, setModels] = useState<Model[]>([]);
-  const [profiles, setProfiles] = useState<string[]>([]);
-  const [profile, setProfile] = useState('api-standard');
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // useSearchParams (via useUrlFilters) requires a Suspense boundary for static prerender.
+  return (
+    <Suspense fallback={<Skeleton className="h-96 w-full rounded-xl" />}>
+      <PricingContent />
+    </Suspense>
+  );
+}
+
+function PricingContent() {
+  const { filters, setFilter } = useUrlFilters({ profile: 'api-standard' });
+  const profile = filters.profile;
+
+  const key = `/api/pricing?profile=${encodeURIComponent(profile)}`;
+  const { data, loading, mutate } = useQuery<PricingResponse>(key, {
+    fetcher: (k) => fetchJson(k),
+  });
+
+  const models = data?.models ?? [];
+  const profiles = Array.from(new Set([...DEFAULT_PROFILES, ...(data?.profiles ?? [])]));
+
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Partial<Model>>({});
   const [showAdd, setShowAdd] = useState(false);
@@ -41,23 +79,7 @@ export default function PricingPage() {
     outputPerMillion: 0,
   });
   const [cloneTarget, setCloneTarget] = useState('');
-
-  const fetchModels = () => {
-    setLoading(true);
-    fetch(`/api/pricing?profile=${encodeURIComponent(profile)}`)
-      .then((r) => r.json())
-      .then((d) => {
-        setModels(d.models || []);
-        setProfiles(d.profiles?.length ? d.profiles : PROFILES);
-        setLastUpdated(d.lastUpdated ?? null);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    fetchModels();
-  }, [profile]);
+  const [saving, setSaving] = useState(false);
 
   const handleEdit = (m: Model) => {
     setEditingId(m.id);
@@ -66,282 +88,319 @@ export default function PricingPage() {
 
   const handleSave = async () => {
     if (!editingId) return;
-    await fetch('/api/pricing', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: editForm.provider,
-        model: editForm.model,
-        inputPerMillion: editForm.inputPerMillion,
-        outputPerMillion: editForm.outputPerMillion,
-        cachedInputPerMillion: editForm.cachedInputPerMillion,
-        cacheWritePerMillion: editForm.cacheWritePerMillion,
-        reasoningPerMillion: editForm.reasoningPerMillion,
-        profile,
-        notes: editForm.notes,
-      }),
-    });
-    setEditingId(null);
-    setEditForm({});
-    fetchModels();
+    setSaving(true);
+    try {
+      await fetch('/api/pricing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: editForm.provider,
+          model: editForm.model,
+          inputPerMillion: editForm.inputPerMillion,
+          outputPerMillion: editForm.outputPerMillion,
+          cachedInputPerMillion: editForm.cachedInputPerMillion,
+          cacheWritePerMillion: editForm.cacheWritePerMillion,
+          reasoningPerMillion: editForm.reasoningPerMillion,
+          profile,
+          notes: editForm.notes,
+        }),
+      });
+      setEditingId(null);
+      setEditForm({});
+      await mutate();
+      invalidateCache('/api/stats');
+      toast.success('Pricing updated', { description: `${editForm.provider}/${editForm.model}` });
+    } catch (e) {
+      toast.error('Failed to save', { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleAdd = async () => {
     if (!newModel.model) return;
-    await fetch('/api/pricing', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...newModel, profile }),
-    });
-    setShowAdd(false);
-    setNewModel({ provider: 'openai', model: '', inputPerMillion: 0, outputPerMillion: 0 });
-    fetchModels();
+    setSaving(true);
+    try {
+      await fetch('/api/pricing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...newModel, profile }),
+      });
+      setShowAdd(false);
+      setNewModel({ provider: 'openai', model: '', inputPerMillion: 0, outputPerMillion: 0 });
+      await mutate();
+      invalidateCache('/api/stats');
+      toast.success('Model added', { description: newModel.model });
+    } catch (e) {
+      toast.error('Failed to add', { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleClone = async () => {
     if (!cloneTarget) return;
-    await fetch('/api/pricing', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'clone',
-        sourceProfile: profile,
-        targetProfile: cloneTarget,
-      }),
-    });
-    setCloneTarget('');
-    fetchModels();
+    setSaving(true);
+    try {
+      await fetch('/api/pricing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clone', sourceProfile: profile, targetProfile: cloneTarget }),
+      });
+      setCloneTarget('');
+      mutateCache(key, undefined);
+      toast.success('Profile cloned', { description: `${profile} → ${cloneTarget}` });
+    } catch (e) {
+      toast.error('Failed to clone', { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Pricing</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Edit model pricing to match your actual usage tier
+          <h2 className="text-xl font-bold tracking-tight">Pricing</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Per-million token rates used to estimate costs
+            {data?.lastUpdated && <> · updated {formatRelativeTime(data.lastUpdated)}</>}
           </p>
-          {lastUpdated && (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Last updated: {formatDateTime(lastUpdated)}
-            </p>
-          )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={profile}
-            onChange={(e) => setProfile(e.target.value)}
-            className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-          >
-            {[...new Set([...PROFILES, ...profiles])].map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => setShowAdd(true)}
-            className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-accent"
-          >
-            Add model
-          </button>
+        <div className="flex items-center gap-2">
+          <Select value={profile} onValueChange={(v) => setFilter('profile', v)}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {profiles.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={() => setShowAdd((v) => !v)} variant={showAdd ? 'secondary' : 'default'}>
+            <Plus className="h-4 w-4" />
+            {showAdd ? 'Cancel' : 'Add model'}
+          </Button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-end gap-2 rounded-2xl border border-border bg-card p-4">
-        <div>
-          <label className="text-xs text-muted-foreground">Clone profile to</label>
-          <input
-            value={cloneTarget}
-            onChange={(e) => setCloneTarget(e.target.value)}
-            placeholder="new-profile-name"
-            className="mt-1 block rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-          />
+      <Card className="p-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1">
+            <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Clone profile to</Label>
+            <Input
+              value={cloneTarget}
+              onChange={(e) => setCloneTarget(e.target.value)}
+              placeholder="new-profile-name"
+              className="w-[200px]"
+            />
+          </div>
+          <Button onClick={handleClone} disabled={!cloneTarget || saving} variant="outline">
+            <Copy className="h-4 w-4" />
+            Clone current
+          </Button>
         </div>
-        <button
-          onClick={handleClone}
-          disabled={!cloneTarget}
-          className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
-        >
-          Clone current profile
-        </button>
-      </div>
+      </Card>
 
       {showAdd && (
-        <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
-          <h3 className="font-semibold">Add custom model</h3>
-          <div className="flex flex-wrap gap-2">
-            <input
-              placeholder="Provider (openai, anthropic…)"
-              value={newModel.provider}
-              onChange={(e) => setNewModel({ ...newModel, provider: e.target.value })}
-              className="rounded-md border border-input px-2 py-1.5 text-sm"
-            />
-            <input
-              placeholder="Model name"
-              value={newModel.model}
-              onChange={(e) => setNewModel({ ...newModel, model: e.target.value })}
-              className="rounded-md border border-input px-2 py-1.5 text-sm"
-            />
-            <input
-              type="number"
-              placeholder="Input/M"
+        <Card className="p-4">
+          <h3 className="mb-3 text-sm font-semibold">Add custom model</h3>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1">
+              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Provider</Label>
+              <Input
+                placeholder="openai, anthropic…"
+                value={newModel.provider}
+                onChange={(e) => setNewModel({ ...newModel, provider: e.target.value })}
+                className="w-[160px]"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Model name</Label>
+              <Input
+                placeholder="e.g. gpt-4o"
+                value={newModel.model}
+                onChange={(e) => setNewModel({ ...newModel, model: e.target.value })}
+                className="w-[180px]"
+              />
+            </div>
+            <NumberField
+              label="Input/M"
               value={newModel.inputPerMillion}
-              onChange={(e) =>
-                setNewModel({ ...newModel, inputPerMillion: parseFloat(e.target.value) })
-              }
-              className="w-24 rounded-md border border-input px-2 py-1.5 text-sm"
+              onChange={(v) => setNewModel({ ...newModel, inputPerMillion: v })}
             />
-            <input
-              type="number"
-              placeholder="Output/M"
+            <NumberField
+              label="Output/M"
               value={newModel.outputPerMillion}
-              onChange={(e) =>
-                setNewModel({ ...newModel, outputPerMillion: parseFloat(e.target.value) })
-              }
-              className="w-24 rounded-md border border-input px-2 py-1.5 text-sm"
+              onChange={(v) => setNewModel({ ...newModel, outputPerMillion: v })}
             />
-            <button onClick={handleAdd} className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground">
-              Save
-            </button>
-            <button onClick={() => setShowAdd(false)} className="rounded-md border px-3 py-1.5 text-sm">
-              Cancel
-            </button>
+            <div className="flex gap-2">
+              <Button onClick={handleAdd} disabled={saving || !newModel.model}>
+                <Check className="h-4 w-4" /> Save
+              </Button>
+              <Button onClick={() => setShowAdd(false)} variant="ghost">
+                <X className="h-4 w-4" /> Cancel
+              </Button>
+            </div>
           </div>
-        </div>
+        </Card>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+      <Card className="overflow-hidden p-0">
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="border-b border-border bg-muted/30">
-              <tr className="text-left text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <th className="px-4 py-3">Provider</th>
-                <th className="px-4 py-3">Model</th>
-                <th className="px-4 py-3 text-right">Input/M</th>
-                <th className="px-4 py-3 text-right">Output/M</th>
-                <th className="px-4 py-3 text-right">Cached/M</th>
-                <th className="px-4 py-3 text-right">Reasoning/M</th>
-                <th className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="pl-5">Provider</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead className="text-right">Input/M</TableHead>
+                <TableHead className="text-right">Output/M</TableHead>
+                <TableHead className="text-right">Cached/M</TableHead>
+                <TableHead className="text-right">Reasoning/M</TableHead>
+                <TableHead className="pr-5 text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {loading ? (
-                <tr>
-                  <td colSpan={7} className="p-8 text-center text-sm text-muted-foreground">
-                    Loading…
-                  </td>
-                </tr>
+                Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={i}>
+                    {Array.from({ length: 7 }).map((__, j) => (
+                      <TableCell key={j}>
+                        <Skeleton className="h-5 w-full" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
               ) : models.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="p-8 text-center text-sm text-muted-foreground">
+                <TableRow>
+                  <TableCell colSpan={7} className="p-10 text-center text-sm text-muted-foreground">
                     No pricing models for this profile
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : (
                 models.map((m) => (
-                  <tr key={m.id} className="border-b border-border text-sm last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-3 font-mono text-xs">{m.provider}</td>
-                    <td className="px-4 py-3 font-medium">{m.model}</td>
-                    <td className="px-4 py-3 text-right font-mono">
+                  <TableRow key={m.id}>
+                    <TableCell className="pl-5 font-mono text-xs text-muted-foreground">{m.provider}</TableCell>
+                    <TableCell className="font-medium">{m.model}</TableCell>
+                    <TableCell className="text-right font-mono text-xs nums">
                       {editingId === m.id ? (
-                        <input
-                          type="number"
-                          step="0.01"
+                        <InlineNumber
                           value={editForm.inputPerMillion ?? 0}
-                          onChange={(e) =>
-                            setEditForm({ ...editForm, inputPerMillion: parseFloat(e.target.value) })
-                          }
-                          className="w-20 rounded border px-2 py-1 text-right text-xs"
+                          onChange={(v) => setEditForm({ ...editForm, inputPerMillion: v })}
                         />
                       ) : (
                         formatCurrency(m.inputPerMillion)
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono">
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs nums">
                       {editingId === m.id ? (
-                        <input
-                          type="number"
-                          step="0.01"
+                        <InlineNumber
                           value={editForm.outputPerMillion ?? 0}
-                          onChange={(e) =>
-                            setEditForm({ ...editForm, outputPerMillion: parseFloat(e.target.value) })
-                          }
-                          className="w-20 rounded border px-2 py-1 text-right text-xs"
+                          onChange={(v) => setEditForm({ ...editForm, outputPerMillion: v })}
                         />
                       ) : (
                         formatCurrency(m.outputPerMillion)
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono">
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs nums">
                       {editingId === m.id ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={editForm.cachedInputPerMillion ?? ''}
-                          onChange={(e) =>
-                            setEditForm({
-                              ...editForm,
-                              cachedInputPerMillion: parseFloat(e.target.value) || undefined,
-                            })
-                          }
-                          className="w-20 rounded border px-2 py-1 text-right text-xs"
+                        <InlineNumber
+                          value={editForm.cachedInputPerMillion}
+                          onChange={(v) => setEditForm({ ...editForm, cachedInputPerMillion: v })}
                         />
                       ) : m.cachedInputPerMillion != null ? (
                         formatCurrency(m.cachedInputPerMillion)
                       ) : (
                         '—'
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono">
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs nums">
                       {editingId === m.id ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={editForm.reasoningPerMillion ?? ''}
-                          onChange={(e) =>
-                            setEditForm({
-                              ...editForm,
-                              reasoningPerMillion: parseFloat(e.target.value) || undefined,
-                            })
-                          }
-                          className="w-20 rounded border px-2 py-1 text-right text-xs"
+                        <InlineNumber
+                          value={editForm.reasoningPerMillion}
+                          onChange={(v) => setEditForm({ ...editForm, reasoningPerMillion: v })}
                         />
                       ) : m.reasoningPerMillion != null ? (
                         formatCurrency(m.reasoningPerMillion)
                       ) : (
                         '—'
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
+                    </TableCell>
+                    <TableCell className="pr-5 text-right">
                       {editingId === m.id ? (
                         <div className="flex justify-end gap-1">
-                          <button onClick={handleSave} className="rounded bg-emerald-600 px-2 py-1 text-xs text-white">
-                            Save
-                          </button>
-                          <button
+                          <Button size="xs" onClick={handleSave} disabled={saving}>
+                            <Check className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="ghost"
                             onClick={() => {
                               setEditingId(null);
                               setEditForm({});
                             }}
-                            className="rounded border px-2 py-1 text-xs"
                           >
-                            Cancel
-                          </button>
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       ) : (
-                        <button onClick={() => handleEdit(m)} className="text-xs text-primary hover:underline">
+                        <Button size="xs" variant="ghost" onClick={() => handleEdit(m)}>
+                          <Pencil className="h-3.5 w-3.5" />
                           Edit
-                        </button>
+                        </Button>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
-      </div>
+      </Card>
+    </div>
+  );
+}
+
+function InlineNumber({
+  value,
+  onChange,
+}: {
+  value: number | null | undefined;
+  onChange: (v: number | undefined) => void;
+}) {
+  return (
+    <Input
+      type="number"
+      step={NUMBER_STEP}
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value === '' ? undefined : parseFloat(e.target.value))}
+      className="ml-auto h-7 w-20 text-right text-xs"
+    />
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</Label>
+      <Input
+        type="number"
+        step={NUMBER_STEP}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        className="w-[110px]"
+      />
     </div>
   );
 }

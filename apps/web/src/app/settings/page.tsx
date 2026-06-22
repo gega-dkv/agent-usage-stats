@@ -1,12 +1,24 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Save, RefreshCw, Database, Trash2, ShieldAlert, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { ScanButton } from '@/components/scan-button';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Separator } from '@/components/ui/separator';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
@@ -15,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { setCurrencyOverride } from '@/lib/format';
 
 type ProviderSetting = {
   id: string;
@@ -34,13 +47,23 @@ type SettingsData = {
   providers: ProviderSetting[];
 };
 
+const PRIVACY_DESC: Record<string, string> = {
+  disabled: 'No prompt content stored. Session metadata and token counts only.',
+  preview: 'Store truncated previews of prompts and responses.',
+  full: 'Store full prompt and response text for browsing.',
+  raw: 'Store raw provider records (most detail — for debugging).',
+};
+
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD'];
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
+  const [purgeOpen, setPurgeOpen] = useState(false);
+  const [purging, setPurging] = useState(false);
 
-  const load = () => {
+  useEffect(() => {
     fetch('/api/settings')
       .then((r) => r.json())
       .then((d) => {
@@ -48,10 +71,6 @@ export default function SettingsPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load();
   }, []);
 
   const save = async (extra?: Record<string, unknown>) => {
@@ -76,31 +95,42 @@ export default function SettingsPage() {
         }),
       });
       const data = await res.json();
-      setMessage(data.scanResult ? 'Rescan complete' : 'Settings saved');
-      setTimeout(() => setMessage(''), 4000);
-      load();
-    } catch {
-      setMessage('Error saving settings');
+      if (data.error) throw new Error(data.error);
+      if (settings.currency) setCurrencyOverride(settings.currency);
+      toast.success(data.scanResult ? 'Rescan complete' : 'Settings saved');
+      // Re-fetch to reflect server-side changes.
+      const fresh = await fetch('/api/settings').then((r) => r.json());
+      setSettings(fresh);
+    } catch (e) {
+      toast.error('Failed to save', { description: e instanceof Error ? e.message : undefined });
     } finally {
       setSaving(false);
     }
   };
 
   const handlePurge = async () => {
-    if (!confirm('Permanently delete all stored prompt/response content?')) return;
-    await fetch('/api/privacy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ purgeContent: true }),
-    });
-    setMessage('Content purged');
+    setPurging(true);
+    try {
+      await fetch('/api/privacy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ purgeContent: true }),
+      });
+      toast.success('Content purged', { description: 'All stored prompt/response text deleted.' });
+      setPurgeOpen(false);
+    } catch (e) {
+      toast.error('Purge failed', { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setPurging(false);
+    }
   };
 
   if (loading || !settings) {
     return (
-      <div className="animate-pulse space-y-4">
-        <div className="h-8 w-48 rounded bg-muted" />
-        <div className="h-64 rounded-2xl bg-muted" />
+      <div className="space-y-6">
+        <Skeleton className="h-6 w-32" />
+        <Skeleton className="h-40 w-full rounded-xl" />
+        <Skeleton className="h-48 w-full rounded-xl" />
       </div>
     );
   }
@@ -109,23 +139,17 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Configure privacy, providers, and storage
-          </p>
+          <h2 className="text-xl font-bold tracking-tight">Settings</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">Privacy, currency, providers, and data controls</p>
         </div>
-        <div className="flex items-center gap-3">
-          {message && (
-            <span className="text-xs text-emerald-600 dark:text-emerald-400">{message}</span>
-          )}
-          <ScanButton variant="compact" />
-        </div>
+        <ScanButton variant="compact" />
       </div>
 
+      {/* Privacy */}
       <Card>
-        <CardHeader>
-          <CardTitle>Privacy</CardTitle>
-          <CardDescription>Control how much prompt content is stored locally</CardDescription>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-sm">Privacy</CardTitle>
+          <CardDescription className="text-xs">Control how much prompt content is stored locally</CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs
@@ -134,89 +158,90 @@ export default function SettingsPage() {
           >
             <TabsList>
               {['disabled', 'preview', 'full', 'raw'].map((mode) => (
-                <TabsTrigger key={mode} value={mode}>
+                <TabsTrigger key={mode} value={mode} className="text-xs capitalize">
                   {mode}
                 </TabsTrigger>
               ))}
             </TabsList>
-            {['disabled', 'preview', 'full', 'raw'].map((mode) => (
-              <TabsContent key={mode} value={mode} className="text-sm text-muted-foreground">
-                {mode === 'disabled' && 'No prompt content stored.'}
-                {mode === 'preview' && 'Store truncated previews only.'}
-                {mode === 'full' && 'Store full prompt and response text.'}
-                {mode === 'raw' && 'Store raw provider records for debugging.'}
-              </TabsContent>
-            ))}
+            <p className="mt-3 text-xs text-muted-foreground">{PRIVACY_DESC[settings.privacyMode]}</p>
+            <TabsContent value={settings.privacyMode} className="hidden" />
           </Tabs>
+          {settings.privacyMode === 'disabled' && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
+              <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+              <p className="text-xs text-warning/90">
+                With privacy disabled, the Prompts page won't show content. Enable preview or full mode to browse prompts.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
+      {/* Data & display */}
       <Card>
-        <CardHeader>
-          <CardTitle>Data & display</CardTitle>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-sm">Data & display</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          <div className="flex items-center gap-2">
-            <Switch
-              id="store-raw"
-              checked={settings.storeRawRecords}
-              onCheckedChange={(checked) =>
-                setSettings({ ...settings, storeRawRecords: checked })
-              }
-            />
-            <Label htmlFor="store-raw">Store raw records (debugging)</Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch
-              id="estimate-prompt"
-              checked={settings.estimatePromptOnlySources}
-              onCheckedChange={(checked) =>
-                setSettings({ ...settings, estimatePromptOnlySources: checked })
-              }
-            />
-            <Label htmlFor="estimate-prompt">Estimate tokens for prompt-only sources</Label>
-          </div>
-          <div className="flex items-center gap-2">
-            <Switch
-              id="resimulate"
-              checked={settings.resimulateRecordedCosts}
-              onCheckedChange={(checked) =>
-                setSettings({ ...settings, resimulateRecordedCosts: checked })
-              }
-            />
-            <Label htmlFor="resimulate">Re-simulate recorded costs</Label>
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label>Currency</Label>
+        <CardContent className="space-y-4">
+          <ToggleRow
+            id="store-raw"
+            label="Store raw records"
+            description="Keep raw provider records for debugging."
+            checked={settings.storeRawRecords}
+            onCheckedChange={(checked) => setSettings({ ...settings, storeRawRecords: checked })}
+          />
+          <Separator />
+          <ToggleRow
+            id="estimate-prompt"
+            label="Estimate prompt-only sources"
+            description="Roughly estimate tokens for prompt-history-only providers (Aider, Cursor)."
+            checked={settings.estimatePromptOnlySources}
+            onCheckedChange={(checked) => setSettings({ ...settings, estimatePromptOnlySources: checked })}
+          />
+          <Separator />
+          <ToggleRow
+            id="resimulate"
+            label="Re-simulate recorded costs"
+            description="Recompute costs from your pricing table even when the provider recorded a cost."
+            checked={settings.resimulateRecordedCosts}
+            onCheckedChange={(checked) => setSettings({ ...settings, resimulateRecordedCosts: checked })}
+          />
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label className="text-sm font-medium">Display currency</Label>
+              <p className="text-xs text-muted-foreground">Currency used to display estimated costs throughout the app.</p>
+            </div>
             <Select
               value={settings.currency}
               onValueChange={(currency) => setSettings({ ...settings, currency })}
             >
-              <SelectTrigger className="w-[120px]">
+              <SelectTrigger className="w-[110px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="USD">USD</SelectItem>
-                <SelectItem value="EUR">EUR</SelectItem>
-                <SelectItem value="GBP">GBP</SelectItem>
+                {CURRENCIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
         </CardContent>
       </Card>
 
+      {/* Providers */}
       <Card>
-        <CardHeader>
-          <CardTitle>Providers</CardTitle>
-          <CardDescription>
-            Enable or disable scanning per provider. Custom paths override defaults.
-          </CardDescription>
+        <CardHeader className="pb-4">
+          <CardTitle className="text-sm">Providers</CardTitle>
+          <CardDescription className="text-xs">Enable/disable scanning per provider. Custom paths override defaults.</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
+        <CardContent className="flex flex-col gap-2">
           {settings.providers.map((p, idx) => (
             <div key={p.id} className="rounded-lg border border-border p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
                   <Switch
                     id={`provider-${p.id}`}
                     checked={p.enabled}
@@ -226,16 +251,15 @@ export default function SettingsPage() {
                       setSettings({ ...settings, providers });
                     }}
                   />
-                  <Label htmlFor={`provider-${p.id}`} className="font-medium">
+                  <Label htmlFor={`provider-${p.id}`} className="text-sm font-medium">
                     {p.label}
                   </Label>
-                  <span className="text-xs text-muted-foreground">({p.supportLevel})</span>
+                  <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    {p.supportLevel}
+                  </span>
                 </div>
               </div>
-              <p
-                className="mt-1 truncate text-[11px] text-muted-foreground"
-                title={p.defaultPaths.join(', ')}
-              >
+              <p className="mt-1.5 truncate text-[11px] text-muted-foreground" title={p.defaultPaths.join(', ')}>
                 Default: {p.defaultPaths[0] || '—'}
               </p>
               <Input
@@ -246,40 +270,94 @@ export default function SettingsPage() {
                   const providers = [...settings.providers];
                   providers[idx] = {
                     ...p,
-                    paths: e.target.value
-                      .split(',')
-                      .map((s) => s.trim())
-                      .filter(Boolean),
+                    paths: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
                   };
                   setSettings({ ...settings, providers });
                 }}
-                className="mt-2 text-xs"
+                className="mt-2 h-8 text-xs"
               />
             </div>
           ))}
         </CardContent>
       </Card>
 
+      {/* Actions */}
       <div className="flex flex-wrap gap-3">
         <Button onClick={() => save()} disabled={saving}>
-          {saving ? 'Saving…' : 'Save settings'}
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          Save settings
         </Button>
         <Button variant="outline" onClick={() => save({ rescan: true })} disabled={saving}>
+          <RefreshCw className="h-4 w-4" />
           Force rescan
         </Button>
         <Button variant="outline" onClick={() => save({ rebuildIndexes: true })} disabled={saving}>
+          <Database className="h-4 w-4" />
           Rebuild rollups
         </Button>
-        <Button variant="destructive" onClick={handlePurge}>
+        <Button variant="destructive" onClick={() => setPurgeOpen(true)}>
+          <Trash2 className="h-4 w-4" />
           Purge content
         </Button>
       </div>
 
       <p className="text-xs text-muted-foreground">
-        The web dashboard binds to localhost (127.0.0.1) by default. Run via{' '}
-        <code className="rounded bg-muted px-1">pnpm cli dashboard</code> or{' '}
-        <code className="rounded bg-muted px-1">pnpm dev</code> — data never leaves your machine.
+        The dashboard binds to localhost (127.0.0.1). Run via{' '}
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">pnpm cli dashboard</code> or{' '}
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">pnpm dev</code> — data never leaves your
+        machine.
       </p>
+
+      {/* Purge confirm dialog */}
+      <Dialog open={purgeOpen} onOpenChange={setPurgeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-4 w-4 text-destructive" />
+              Purge all stored content?
+            </DialogTitle>
+            <DialogDescription>
+              This permanently deletes all stored prompt and response text, and clears the search index. Session metadata
+              and token counts are preserved. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPurgeOpen(false)} disabled={purging}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handlePurge} disabled={purging}>
+              {purging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Purge everything
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ToggleRow({
+  id,
+  label,
+  description,
+  checked,
+  onCheckedChange,
+}: {
+  id: string;
+  label: string;
+  description: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="space-y-0.5">
+        <Label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </Label>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
     </div>
   );
 }
