@@ -1,0 +1,300 @@
+/* Inter (sans) + JetBrains Mono (mono), bundled locally — no network. */
+@import '@fontsource-variable/inter';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+
+/* CSS variables for the font families so Tailwind's font-sans/font-mono resolve. */
+:root {
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Surfaces — light, airy, paper-like */
+    --background: 210 30% 99%;
+    --foreground: 222 30% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 30% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 30% 12%;
+
+    /* Sidebar — subtle tint, distinct from main bg */
+    --sidebar: 220 24% 97%;
+    --sidebar-foreground: 222 30% 14%;
+    --sidebar-border: 220 18% 90%;
+    --sidebar-accent: 220 22% 93%;
+    --sidebar-accent-foreground: 222 30% 12%;
+
+    /* Brand — indigo/blue */
+    --primary: 222 88% 55%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 220 18% 95%;
+    --secondary-foreground: 222 30% 14%;
+
+    --muted: 220 18% 95%;
+    --muted-foreground: 220 10% 42%;
+
+    --accent: 220 20% 94%;
+    --accent-foreground: 222 30% 12%;
+
+    --destructive: 0 78% 55%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Semantic — replace ad-hoc amber/emerald hardcoding */
+    --success: 152 60% 38%;
+    --success-foreground: 210 40% 98%;
+    --success-soft: 152 60% 38%;
+    --warning: 35 92% 50%;
+    --warning-foreground: 30 50% 12%;
+    --warning-soft: 35 92% 50%;
+    --info: 210 90% 50%;
+    --info-foreground: 210 40% 98%;
+    --info-soft: 210 90% 50%;
+
+    --border: 220 16% 90%;
+    --input: 220 16% 90%;
+    --ring: 222 88% 55%;
+
+    --radius: 0.625rem;
+
+    /* Premium elevation */
+    --shadow-card: 0 1px 2px 0 rgb(222 30% 12% / 0.04), 0 1px 3px 0 rgb(222 30% 12% / 0.06);
+    --shadow-popover: 0 4px 12px -2px rgb(222 30% 12% / 0.08), 0 2px 6px -2px rgb(222 30% 12% / 0.06);
+    --shadow-sidebar: 1px 0 0 0 hsl(var(--sidebar-border));
+  }
+
+  .dark {
+    /* Premium dark — rich near-black with subtle cool tone (Linear/Vercel) */
+    --background: 224 32% 5%;
+    --foreground: 210 28% 96%;
+
+    --card: 222 28% 8%;
+    --card-foreground: 210 28% 96%;
+
+    --popover: 222 28% 9%;
+    --popover-foreground: 210 28% 96%;
+
+    /* Sidebar — slightly deeper than main bg for separation */
+    --sidebar: 224 30% 7%;
+    --sidebar-foreground: 210 24% 88%;
+    --sidebar-border: 220 20% 14%;
+    --sidebar-accent: 220 22% 13%;
+    --sidebar-accent-foreground: 210 28% 96%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 224 32% 5%;
+
+    --secondary: 220 20% 13%;
+    --secondary-foreground: 210 28% 96%;
+
+    --muted: 220 20% 13%;
+    --muted-foreground: 216 16% 62%;
+
+    --accent: 220 22% 15%;
+    --accent-foreground: 210 28% 96%;
+
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 152 55% 48%;
+    --success-foreground: 224 32% 5%;
+    --success-soft: 152 55% 48%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 28 60% 8%;
+    --warning-soft: 38 92% 55%;
+    --info: 210 90% 60%;
+    --info-foreground: 224 32% 5%;
+    --info-soft: 210 90% 60%;
+
+    --border: 220 20% 15%;
+    --input: 220 20% 16%;
+    --ring: 217 91% 60%;
+
+    --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 0 rgb(0 0 0 / 0.2);
+    --shadow-popover: 0 8px 24px -4px rgb(0 0 0 / 0.5), 0 4px 8px -2px rgb(0 0 0 / 0.3);
+    --shadow-sidebar: 1px 0 0 0 hsl(var(--sidebar-border));
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* The custom titlebar makes the app chrome flush with content; remove the
+       default body margin so the webview fills the window. */
+    margin: 0;
+    overflow: hidden;
+  }
+  /* Tabular numerals on numeric data by convention via .nums utility */
+  .nums {
+    font-feature-settings: 'tnum' 1, 'rlig' 1, 'calt' 1;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer utilities {
+  .fill-muted-foreground {
+    fill: hsl(var(--muted-foreground));
+  }
+  .fill-foreground {
+    fill: hsl(var(--foreground));
+  }
+  .animate-sync-bar {
+    animation: sync-bar 1.1s ease-in-out infinite;
+  }
+  .animate-sync-dot {
+    animation: sync-dot 900ms ease-in-out infinite;
+  }
+  /* Premium glass surface */
+  .glass {
+    background-color: hsl(var(--card) / 0.7);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+  }
+  .glass-header {
+    background-color: hsl(var(--background) / 0.72);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+  }
+  /* Subtle grid texture for empty canvases */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.4) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.4) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  /* Focus ring helpers */
+  .ring-focus {
+    outline: none;
+  }
+  .ring-focus:focus-visible {
+    box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring));
+  }
+}
+
+@keyframes sync-bar {
+  0% {
+    transform: translateX(-110%);
+  }
+  55% {
+    transform: translateX(65%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+@keyframes sync-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Chart draw-in animation */
+@keyframes draw-in {
+  from {
+    stroke-dashoffset: var(--dash-len, 1000);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.animate-draw {
+  stroke-dasharray: var(--dash-len, 1000);
+  animation: draw-in 900ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Bar grow animation */
+@keyframes grow-up {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+.animate-grow {
+  transform-origin: bottom;
+  animation: grow-up 500ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Fade/slide in for palette & panels */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: fade-in 180ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* Smooth transitions on interactive surfaces only (not all elements — perf) */
+button,
+a,
+input,
+select,
+textarea,
+[role='button'] {
+  transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Sonner toast theming overrides */
+[data-sonner-toaster] [data-sonner-toast] {
+  --normal-bg: hsl(var(--popover)) !important;
+  --normal-border: hsl(var(--border)) !important;
+  --normal-text: hsl(var(--popover-foreground)) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow-popover) !important;
+}
+
+/* cmdk palette */
+[cmdk-root] {
+  width: 100%;
+}
