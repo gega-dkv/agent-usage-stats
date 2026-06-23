@@ -60,6 +60,53 @@ describe('Claude Parser', () => {
     expect(result.sessions.map((s) => s.id).sort()).toEqual(['session-a', 'session-b']);
   });
 
+  it('collapses cumulative streaming chunks into the final assistant turn', async () => {
+    const result = await claudeParser.parse(fixture('claude', 'streaming-dedup'));
+
+    expect(result.sessions).toHaveLength(1);
+    const session = result.sessions[0];
+    // Two user turns + two assistant turns (3 chunks of the first assistant
+    // message collapse to one). No fabricated/estimated rows.
+    const assistants = session.messages.filter((m) => m.role === 'assistant');
+    expect(assistants).toHaveLength(2);
+
+    // Final cumulative chunk wins: input 1000, cache_create 200, cache_read 300, output 500
+    const first = assistants[0];
+    expect(first.id).toBe('msg_01ABCDEF');
+    expect(first.inputTokens).toBe(1000);
+    expect(first.cacheCreationTokens).toBe(200);
+    expect(first.cacheReadTokens).toBe(300);
+    expect(first.outputTokens).toBe(500);
+
+    // Session totals must reflect the deduped values, not the sum of every chunk.
+    expect(session.totals.inputTokens).toBe(1000 + 2000);
+    expect(session.totals.cacheCreationTokens).toBe(200);
+    expect(session.totals.cacheReadTokens).toBe(300 + 800);
+    expect(session.totals.outputTokens).toBe(500 + 75);
+    // 3 chunks + 1 second assistant + 2 user messages = 4 stored messages.
+    expect(session.messages).toHaveLength(4);
+  });
+
+  it('parses the nested message.* Claude Code format and flags Vertex rows', async () => {
+    const result = await claudeParser.parse(fixture('claude', 'nested-format'));
+
+    expect(result.sessions).toHaveLength(1);
+    const session = result.sessions[0];
+    const assistants = session.messages.filter((m) => m.role === 'assistant');
+    expect(assistants).toHaveLength(2);
+
+    // Model is read from the nested message.model, not the record top level.
+    expect(assistants[0].model).toBe('claude-sonnet-4-5');
+    expect(assistants[1].model).toBe('claude-3-5-sonnet@20240620');
+
+    // The @-suffixed model marks the second row as Vertex-served.
+    expect(assistants[0].metadata).toBeUndefined();
+    expect(assistants[1].metadata?.vertex).toBe(true);
+
+    expect(session.totals.inputTokens).toBe(1500 + 1200);
+    expect(session.totals.outputTokens).toBe(300 + 120);
+  });
+
   it('streams JSONL line-by-line without loading the full file into memory', async () => {
     const readSpy = vi.spyOn(fs, 'readFileSync');
     try {
