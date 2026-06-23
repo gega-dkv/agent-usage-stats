@@ -1,0 +1,6 @@
+{"type":"model_change","timestamp":"2026-06-18T12:00:00Z","provider":"openai-codex","modelId":"gpt-5.5-codex"}
+{"type":"message","timestamp":"2026-06-18T12:00:05Z","message":{"role":"user","content":"First prompt"}}
+{"type":"message","timestamp":"2026-06-18T12:00:06Z","message":{"role":"assistant","model":"gpt-5.5-codex","content":"codex reply","usage":{"input":1000,"cacheRead":200,"output":120}}}
+{"type":"model_change","timestamp":"2026-06-18T12:05:00Z","provider":"anthropic","modelId":"claude-sonnet-4-5"}
+{"type":"message","timestamp":"2026-06-18T12:05:05Z","message":{"role":"user","content":"Second prompt"}}
+{"type":"message","timestamp":"2026-06-18T12:05:06Z","message":{"role":"assistant","model":"claude-sonnet-4-5","content":"claude reply","usage":{"input_tokens":1500,"cache_creation_input_tokens":300,"cache_read_input_tokens":400,"output_tokens":250}}}

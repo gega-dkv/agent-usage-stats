@@ -19,29 +19,62 @@ const PREFIX_PROVIDERS: Record<string, PricingProvider> = {
 
 /** Built-in aliases for common provider model name variants. */
 export const DEFAULT_MODEL_ALIASES: ModelAliasMap = {
+  // OpenAI ChatGPT / consumer aliases
   'chatgpt-4o': 'gpt-4o',
   'chatgpt-4o-latest': 'gpt-4o',
   'chatgpt-4o-mini': 'gpt-4o-mini',
   'chatgpt-4o-mini-latest': 'gpt-4o-mini',
   'chatgpt-4.1': 'gpt-4.1',
   'chatgpt-4.1-mini': 'gpt-4.1-mini',
+  'chatgpt-4.1-nano': 'gpt-4.1-nano',
+  'chatgpt-5.5': 'gpt-5.5',
+  'chatgpt-5.5-pro': 'gpt-5.5-pro',
+  'chatgpt-5.4': 'gpt-5.4',
+  'chatgpt-5.4-mini': 'gpt-5.4-mini',
+  'chatgpt-5.4-nano': 'gpt-5.4-nano',
+  'chatgpt-5.4-pro': 'gpt-5.4-pro',
+  'chatgpt-5.3-codex': 'gpt-5.3-codex',
+  // OpenAI model family shorthands
+  'gpt-5.5': 'gpt-5.5',
+  'gpt-5.5-pro': 'gpt-5.5-pro',
+  'gpt-5.4': 'gpt-5.4',
+  'gpt-5.4-mini': 'gpt-5.4-mini',
+  'gpt-5.4-nano': 'gpt-5.4-nano',
+  'gpt-5.4-pro': 'gpt-5.4-pro',
+  'gpt-5.3-codex': 'gpt-5.3-codex',
   'codex-mini': 'codex-mini-latest',
-  'claude-sonnet-4': 'claude-sonnet-4-20250514',
-  'claude-opus-4': 'claude-opus-4-20250514',
+  // Anthropic shorthand aliases (map to current generation)
+  'claude-fable-5': 'claude-fable-5',
+  'claude-mythos-5': 'claude-mythos-5',
+  'claude-opus-4': 'claude-opus-4-8',
   'claude-opus-4-1': 'claude-opus-4-1-20250805',
+  'claude-opus-4-5': 'claude-opus-4-5',
+  'claude-opus-4-6': 'claude-opus-4-6',
+  'claude-opus-4-7': 'claude-opus-4-7',
+  'claude-opus-4-8': 'claude-opus-4-8',
+  'claude-sonnet-4': 'claude-sonnet-4-6',
+  'claude-sonnet-4-5': 'claude-sonnet-4-5',
+  'claude-sonnet-4-6': 'claude-sonnet-4-6',
+  'claude-haiku-4-5': 'claude-haiku-4-5',
   'claude-3-7-sonnet': 'claude-3-7-sonnet-20250219',
   'claude-3-5-sonnet': 'claude-3-5-sonnet-20241022',
   'claude-3-5-sonnet-latest': 'claude-3-5-sonnet-20241022',
   'claude-3-5-haiku': 'claude-3-5-haiku-20241022',
   'claude-3-opus': 'claude-3-opus-20240229',
+  // Gemini aliases
   'gemini-pro': 'gemini-2.5-pro',
   'gemini-flash': 'gemini-2.5-flash',
+  'gemini-flash-lite': 'gemini-2.5-flash-lite',
   'gemini-2.0-flash-exp': 'gemini-2.0-flash',
   'gemini-1.5-pro': 'gemini-2.5-pro',
   'gemini-1.5-flash': 'gemini-2.5-flash',
+  'gemini-3.1-pro': 'gemini-3.1-pro-preview',
+  'gemini-3.1-flash-lite': 'gemini-3.1-flash-lite-preview',
+  // Qwen aliases
   'qwen-max-latest': 'qwen-max',
   'qwen-plus-latest': 'qwen-plus',
   'qwen-turbo-latest': 'qwen-turbo',
+  // Moonshot / Kimi aliases
   'kimi-latest': { target: 'moonshot-v1-128k', provider: 'moonshot' },
   'kimi-k2': { target: 'moonshot-v1-128k', provider: 'moonshot' },
 };
@@ -55,6 +88,7 @@ type PatternAlias = {
 };
 
 const PATTERN_ALIASES: PatternAlias[] = [
+  // OpenAI dated snapshots
   {
     pattern: /^(gpt-4o(?:-mini)?)-\d{4}-\d{2}-\d{2}$/i,
     resolve: (match) => ({ model: match[1]!.toLowerCase() }),
@@ -62,6 +96,21 @@ const PATTERN_ALIASES: PatternAlias[] = [
   {
     pattern: /^(gpt-4\.1(?:-(?:mini|nano))?(?:-preview)?)-\d{4}-\d{2}-\d{2}$/i,
     resolve: (match) => ({ model: match[1]!.toLowerCase().replace(/-preview$/, '') }),
+  },
+  {
+    pattern: /^gpt-5\.5(-pro)?-\d{4}-\d{2}-\d{2}$/i,
+    resolve: (match) => ({ model: match[1] ? 'gpt-5.5-pro' : 'gpt-5.5' }),
+  },
+  {
+    pattern: /^gpt-5\.4((?:-(?:mini|nano|pro))?)-\d{4}-\d{2}-\d{2}$/i,
+    resolve: (match) => {
+      const suffix = match[1] ? match[1].toLowerCase().replace(/^-/, '') : '';
+      return { model: suffix ? `gpt-5.4-${suffix}` : 'gpt-5.4' };
+    },
+  },
+  {
+    pattern: /^gpt-5\.3-codex-\d{4}-\d{2}-\d{2}$/i,
+    resolve: () => ({ model: 'gpt-5.3-codex' }),
   },
   {
     pattern: /^chatgpt-4o(-latest)?$/i,
@@ -79,8 +128,17 @@ const PATTERN_ALIASES: PatternAlias[] = [
     pattern: /^o3(-mini|-preview)?$/i,
     resolve: (match) => ({ model: match[1] ? `o3${match[1]}` : 'o3' }),
   },
+  // Anthropic dated / versioned snapshots
   {
-    pattern: /^claude-sonnet-4(-\d)?(-\d{8})?$/i,
+    pattern: /^claude-sonnet-4-6(-\d{8})?$/i,
+    resolve: () => ({ model: 'claude-sonnet-4-6' }),
+  },
+  {
+    pattern: /^claude-sonnet-4-5(-\d{8})?$/i,
+    resolve: () => ({ model: 'claude-sonnet-4-5' }),
+  },
+  {
+    pattern: /^claude-sonnet-4(-\d{8})?$/i,
     resolve: () => ({ model: 'claude-sonnet-4-20250514' }),
   },
   {
@@ -88,8 +146,19 @@ const PATTERN_ALIASES: PatternAlias[] = [
     resolve: () => ({ model: 'claude-opus-4-1-20250805' }),
   },
   {
+    pattern: /^claude-opus-4-[5-8](-\d{8})?$/i,
+    resolve: (match) => {
+      const base = match[0]!.split('-').slice(0, 4).join('-').toLowerCase();
+      return { model: base };
+    },
+  },
+  {
     pattern: /^claude-opus-4(-\d{8})?$/i,
     resolve: () => ({ model: 'claude-opus-4-20250514' }),
+  },
+  {
+    pattern: /^claude-haiku-4-5(-\d{8})?$/i,
+    resolve: () => ({ model: 'claude-haiku-4-5' }),
   },
   {
     pattern: /^claude-3-7-sonnet(-\d{8})?$/i,
@@ -103,6 +172,7 @@ const PATTERN_ALIASES: PatternAlias[] = [
     pattern: /^claude-3-5-haiku(-\d{8})?$/i,
     resolve: () => ({ model: 'claude-3-5-haiku-20241022' }),
   },
+  // Provider-prefixed / platform model IDs
   {
     pattern: /^models\/(.+)$/i,
     resolve: (match) => ({ model: match[1]!.toLowerCase() }),
@@ -111,18 +181,40 @@ const PATTERN_ALIASES: PatternAlias[] = [
     pattern: /^publishers\/google\/models\/(.+)$/i,
     resolve: (match) => ({ model: match[1]!.toLowerCase(), provider: 'google' }),
   },
+  // Gemini preview/exp aliases
   {
     pattern: /^(gemini-2\.5-pro)(-preview.*|-exp.*)?$/i,
     resolve: (match) => ({ model: match[1]!.toLowerCase() }),
   },
   {
-    pattern: /^(gemini-2\.5-flash(?:-lite)?)(-preview.*|-exp.*)?$/i,
+    pattern: /^(gemini-2\.5-flash)(-preview.*|-exp.*)?$/i,
+    resolve: (match) => ({ model: match[1]!.toLowerCase() }),
+  },
+  {
+    pattern: /^(gemini-2\.5-flash-lite)(-preview.*|-exp.*)?$/i,
+    resolve: (match) => ({ model: match[1]!.toLowerCase() }),
+  },
+  {
+    pattern: /^(gemini-2\.0-flash)(-preview.*|-exp.*)?$/i,
+    resolve: (match) => ({ model: match[1]!.toLowerCase() }),
+  },
+  {
+    pattern: /^(gemini-3\.1-pro-preview)(-\d{4}-\d{2}-\d{2})?$/i,
+    resolve: (match) => ({ model: match[1]!.toLowerCase() }),
+  },
+  {
+    pattern: /^(gemini-3\.1-flash-lite-preview)(-\d{4}-\d{2}-\d{2})?$/i,
+    resolve: (match) => ({ model: match[1]!.toLowerCase() }),
+  },
+  {
+    pattern: /^(gemini-3\.5-flash)(-preview.*|-exp.*)?$/i,
     resolve: (match) => ({ model: match[1]!.toLowerCase() }),
   },
   {
     pattern: /^google\/(gemini[\w.-]+)$/i,
     resolve: (match) => ({ model: match[1]!.toLowerCase(), provider: 'google' }),
   },
+  // Qwen aliases
   {
     pattern: /^qwen2\.5(?:-[\w.-]+)?$/i,
     resolve: () => ({ model: 'qwen-plus', provider: 'qwen' }),
@@ -138,6 +230,7 @@ const PATTERN_ALIASES: PatternAlias[] = [
       return { model: base, provider: 'qwen' };
     },
   },
+  // Moonshot / Kimi aliases
   {
     pattern: /^kimi[-_.\w]*$/i,
     resolve: () => ({ model: 'moonshot-v1-128k', provider: 'moonshot' }),

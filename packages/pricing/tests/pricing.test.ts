@@ -162,6 +162,9 @@ describe('Pricing Engine', () => {
     it('resolves Anthropic shorthand and dated aliases', () => {
       expect(
         lookupPricing('claude-sonnet-4', 'anthropic', models).pricing?.model,
+      ).toBe('claude-sonnet-4-6');
+      expect(
+        lookupPricing('claude-sonnet-4-20250514', 'anthropic', models).pricing?.model,
       ).toBe('claude-sonnet-4-20250514');
       expect(
         lookupPricing('claude-3-5-sonnet-latest', 'anthropic', models).pricing?.model,
@@ -169,6 +172,9 @@ describe('Pricing Engine', () => {
       expect(
         lookupPricing('claude-opus-4-1', 'anthropic', models).pricing?.model,
       ).toBe('claude-opus-4-1-20250805');
+      expect(
+        lookupPricing('claude-opus-4-8', 'anthropic', models).pricing?.model,
+      ).toBe('claude-opus-4-8');
     });
 
     it('resolves Gemini, Vertex, and OpenRouter Gemini aliases', () => {
@@ -206,7 +212,7 @@ describe('Pricing Engine', () => {
       ).toBe('claude-3-5-sonnet-20241022');
       expect(
         lookupPricing('openrouter/anthropic/claude-sonnet-4', 'other', models).pricing?.model,
-      ).toBe('claude-sonnet-4-20250514');
+      ).toBe('claude-sonnet-4-6');
       expect(lookupPricing('openai/gpt-4o', 'other', models).pricing?.model).toBe('gpt-4o');
     });
 

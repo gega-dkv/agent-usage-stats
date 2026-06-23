@@ -5,28 +5,50 @@ import type {
   ProviderParser,
   ParseResult,
   ParseOptions,
-  NormalizedSession,
   NormalizedMessage,
+  NormalizedSession,
 } from '@agent-usage/shared';
 import { generateId, truncateText, estimateTokensFromText, totalsFromMessages } from '@agent-usage/shared';
 import { shouldStoreRaw } from './parser-helpers.js';
 
+type ClaudeUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+};
+
+type ClaudeContentBlock = { type: string; text?: string; name?: string; input?: unknown };
+
+/**
+ * Claude session records come in two shapes:
+ * - Real Claude Code logs: top-level `type` is "assistant"/"user", with model,
+ *   usage, id and content living under a nested `message` object, plus an
+ *   optional `requestId`. Assistant turns are emitted as many cumulative
+ *   streaming chunks sharing the same `message.id` + `requestId`.
+ * - Simplified/legacy fixtures: top-level `type:"message"`, `role`, `model`
+ *   and `usage` sit on the record itself, identified by `uuid`.
+ */
 type ClaudeMessage = {
   type?: string;
   role?: string;
-  content?: string | Array<{ type: string; text?: string; name?: string; input?: unknown }>;
+  content?: string | ClaudeContentBlock[];
   model?: string;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  };
+  usage?: ClaudeUsage;
   timestamp?: string;
   cost_usd?: number;
   session_id?: string;
   parent_id?: string;
   uuid?: string;
+  requestId?: string;
+  // Nested (real Claude Code) shape
+  message?: {
+    id?: string;
+    role?: string;
+    model?: string;
+    content?: string | ClaudeContentBlock[];
+    usage?: ClaudeUsage;
+  };
 };
 
 export const claudeParser: ProviderParser = {
@@ -43,6 +65,8 @@ export const claudeParser: ProviderParser = {
           const r = JSON.parse(line);
           if (
             r.type === 'message' ||
+            r.type === 'assistant' ||
+            r.type === 'user' ||
             r.role === 'user' ||
             r.role === 'assistant' ||
             r.role === 'human' ||
@@ -85,6 +109,10 @@ async function parseClaudeJsonl(
   const sessions = new Map<string, NormalizedSession>();
   const warnings: ParseResult['warnings'] = [];
   const messagesBySession = new Map<string, NormalizedMessage[]>();
+  // Per-session dedup map: canonical assistant key (messageId:requestId) -> index
+  // into the session's message array. Streaming chunks share a key and collapse
+  // onto the last (cumulative) occurrence.
+  const dedupIndex = new Map<string, Map<string, number>>();
 
   const fileStream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
@@ -111,31 +139,64 @@ async function parseClaudeJsonl(
 
       if (record.type === 'summary' || record.type === 'system') continue;
 
-      const role = mapClaudeRole(record.role || record.type || 'unknown');
-      const contentText = extractContentText(record.content);
+      // Resolve the canonical shape: prefer the nested `message` object when
+      // present (real Claude Code logs), otherwise fall back to top-level fields.
+      const nested = isObject(record.message) ? record.message : undefined;
+      const role = mapClaudeRole(
+        record.role ?? record.type ?? nested?.role ?? 'unknown',
+      );
+      const contentSource = nested?.content ?? record.content;
+      const contentText = extractContentText(contentSource);
       const contentPreview = truncateText(contentText || '', 200);
 
-      const usage = record.usage || {};
+      const usage = nested?.usage ?? record.usage ?? {};
+      const model = nested?.model ?? record.model;
+      const messageId = nested?.id ?? record.uuid;
+
       const cacheCreationTokens = usage.cache_creation_input_tokens;
       const cacheReadTokens = usage.cache_read_input_tokens;
       const cachedInputTokens =
         cacheCreationTokens || cacheReadTokens
           ? (cacheCreationTokens || 0) + (cacheReadTokens || 0)
           : undefined;
-      const inputTokens = usage.input_tokens || undefined;
-      const outputTokens = usage.output_tokens || undefined;
+      const inputTokens = usage.input_tokens;
+      const outputTokens = usage.output_tokens;
 
-      let estInput = inputTokens;
+      const hasUsageBlock =
+        inputTokens != null ||
+        outputTokens != null ||
+        cacheCreationTokens != null ||
+        cacheReadTokens != null;
+
+      // Real usage was provided for this row but every field is zero/absent.
+      // Skip it rather than fabricating counts from text.
+      const allZero =
+        hasUsageBlock &&
+        !inputTokens &&
+        !outputTokens &&
+        !cacheCreationTokens &&
+        !cacheReadTokens;
+      if (allZero) continue;
+
+      // Real usage in Claude Code lives on assistant turns and is cumulative —
+      // the assistant's `input_tokens` already includes the user prompt that
+      // preceded it. So we never estimate *user* tokens from text (that would
+      // double-count). Only an assistant message with no usage block at all
+      // falls back to a text estimate of its output.
+      const estInput = inputTokens;
       let estOutput = outputTokens;
-      if (!estInput && role === 'user') estInput = estimateTokensFromText(contentText || '');
-      if (!estOutput && role === 'assistant') estOutput = estimateTokensFromText(contentText || '');
+      let estimated = false;
+      if (!hasUsageBlock && role === 'assistant' && !estOutput) {
+        estOutput = estimateTokensFromText(contentText || '');
+        estimated = true;
+      }
 
       let toolName: string | undefined;
       let toolInputPreview: string | undefined;
       let toolOutputPreview: string | undefined;
 
-      if (Array.isArray(record.content)) {
-        for (const block of record.content) {
+      if (Array.isArray(contentSource)) {
+        for (const block of contentSource) {
           if (block.type === 'tool_use') {
             toolName = block.name;
             toolInputPreview = truncateText(JSON.stringify(block.input || ''), 200);
@@ -150,18 +211,16 @@ async function parseClaudeJsonl(
       }
 
       const message: NormalizedMessage = {
-        id: record.uuid || generateId(),
+        id: messageId || generateId(),
         sessionId: currentSessionId,
         timestamp: record.timestamp,
         role,
-        model: record.model,
+        model,
         contentText: options?.privacyMode === 'disabled' ? undefined : contentText,
         contentPreview:
           options?.privacyMode === 'disabled'
             ? `[${role} message]`
-            : options?.privacyMode === 'preview'
-              ? contentPreview
-              : contentPreview,
+            : contentPreview,
         inputTokens: estInput,
         outputTokens: estOutput,
         cachedInputTokens,
@@ -170,10 +229,33 @@ async function parseClaudeJsonl(
         toolName,
         toolInputPreview: options?.privacyMode === 'disabled' ? undefined : toolInputPreview,
         toolOutputPreview: options?.privacyMode === 'disabled' ? undefined : toolOutputPreview,
+        metadata: maybeClaudeMetadata(record, model),
+        usageConfidence: hasUsageBlock
+          ? 'exact'
+          : estimated
+            ? 'estimated-from-text'
+            : undefined,
         raw: shouldStoreRaw(options) ? record : undefined,
       };
 
-      messagesBySession.get(currentSessionId)!.push(message);
+      // Collapse cumulative streaming chunks: when an assistant row reuses the
+      // same (messageId, requestId) key, the latest row holds the cumulative
+      // totals, so replace the prior row in place instead of appending a
+      // second one (which would double-count tokens).
+      const dedupKey = claudeDedupKey(messageId, record.requestId);
+      if (role === 'assistant' && dedupKey) {
+        const sessionMap = getOrInit(dedupIndex, currentSessionId, () => new Map());
+        const priorIdx = sessionMap.get(dedupKey);
+        const list = messagesBySession.get(currentSessionId)!;
+        if (priorIdx !== undefined && priorIdx < list.length) {
+          list[priorIdx] = message;
+        } else {
+          sessionMap.set(dedupKey, list.length);
+          list.push(message);
+        }
+      } else {
+        messagesBySession.get(currentSessionId)!.push(message);
+      }
     } catch (e) {
       warnings.push({
         file: filePath,
@@ -205,6 +287,34 @@ async function parseClaudeJsonl(
   return { sessions: Array.from(sessions.values()), warnings };
 }
 
+/** Returns the canonical dedup key for a Claude assistant turn. */
+function claudeDedupKey(messageId: string | undefined, requestId: string | undefined): string | null {
+  if (!messageId) return null;
+  return `${messageId}:${requestId ?? ''}`;
+}
+
+/**
+ * Detects Vertex AI-served rows (model like `claude-…@…`, or `_vrtx_` markers
+ * in the message id / requestId) and records the flag on message metadata for
+ * downstream filtering. No filtering modes are applied here.
+ */
+function maybeClaudeMetadata(
+  record: ClaudeMessage,
+  model: string | undefined,
+): Record<string, unknown> | undefined {
+  const vertex = isVertexRow(record, model);
+  if (!vertex) return undefined;
+  return { vertex: true };
+}
+
+function isVertexRow(record: ClaudeMessage, model: string | undefined): boolean {
+  const messageId = record.message?.id;
+  if (messageId && messageId.includes('_vrtx_')) return true;
+  if (record.requestId && record.requestId.includes('_vrtx_')) return true;
+  if (model && model.startsWith('claude-') && model.includes('@')) return true;
+  return false;
+}
+
 function mapClaudeRole(role: string): NormalizedMessage['role'] {
   switch (role.toLowerCase()) {
     case 'human':
@@ -223,7 +333,7 @@ function mapClaudeRole(role: string): NormalizedMessage['role'] {
 }
 
 function extractContentText(
-  content: string | Array<{ type: string; text?: string }> | undefined,
+  content: string | ClaudeContentBlock[] | undefined,
 ): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -233,4 +343,16 @@ function extractContentText(
       .join('\n');
   }
   return '';
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getOrInit<K, V>(map: Map<K, V>, key: K, init: () => V): V {
+  const existing = map.get(key);
+  if (existing) return existing;
+  const value = init();
+  map.set(key, value);
+  return value;
 }

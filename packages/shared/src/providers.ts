@@ -83,20 +83,22 @@ export const PROVIDER_REGISTRY: Record<Provider, ProviderDefinition> = {
     id: 'codex',
     label: 'Codex CLI',
     pricingProvider: 'openai',
-    supportLevel: 'partial-usage',
-    defaultConfidence: 'estimated-from-text',
-    storageKinds: ['json', 'jsonl'],
+    supportLevel: 'exact-usage',
+    defaultConfidence: 'exact',
+    storageKinds: ['jsonl', 'json'],
     envVars: ['CODEX_HOME'],
     defaultPaths: [
-      '$CODEX_HOME/**/*.json',
+      '$CODEX_HOME/sessions/**/*.jsonl',
       '$CODEX_HOME/**/*.jsonl',
-      '~/.codex/**/*.json',
+      '$CODEX_HOME/**/*.json',
+      '~/.codex/sessions/**/*.jsonl',
       '~/.codex/**/*.jsonl',
+      '~/.codex/**/*.json',
     ],
     detectDirs: ['$CODEX_HOME', '~/.codex'],
     hasParser: true,
     enabledByDefault: true,
-    notes: 'Token usage when present, otherwise estimated from text.',
+    notes: 'Exact token usage from token_count events; falls back to text estimation for legacy schemas.',
   },
   gemini: {
     id: 'gemini',
@@ -322,6 +324,23 @@ export const PROVIDER_REGISTRY: Record<Provider, ProviderDefinition> = {
     hasParser: true,
     enabledByDefault: false,
     notes: 'Detection only — no stable public token/session schema.',
+  },
+  grok: {
+    id: 'grok',
+    label: 'Grok',
+    pricingProvider: 'other',
+    // Grok's local `signals.json` exposes aggregate context-window token counts
+    // (totalTokensBeforeCompaction + contextTokensUsed) with no input/output
+    // split and no cost data, so we treat it as prompt-history-only.
+    supportLevel: 'prompt-history-only',
+    defaultConfidence: 'metadata-only',
+    storageKinds: ['json'],
+    envVars: ['GROK_DATA_DIR'],
+    defaultPaths: ['~/.grok/sessions/**/signals.json'],
+    detectDirs: ['~/.grok'],
+    hasParser: true,
+    enabledByDefault: false,
+    notes: 'Aggregate token counts only — no cost, no input/output split.',
   },
 };
 

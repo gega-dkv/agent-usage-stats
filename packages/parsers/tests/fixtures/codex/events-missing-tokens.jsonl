@@ -1,0 +1,4 @@
+{"timestamp":"2026-06-06T00:00:00.000Z","type":"session_meta","payload":{"id":"codex-events-missing","timestamp":"2026-06-06T00:00:00.000Z","cwd":"/Users/gabrielgeorgescu/Code/proj","originator":"codex-tui","cli_version":"0.130.0","source":"cli","model_provider":"openai"}}
+{"timestamp":"2026-06-06T00:00:01.000Z","type":"turn_context","payload":{"turn_id":"turn-1","cwd":"/Users/gabrielgeorgescu/Code/proj","model":"gpt-5.5"}}
+{"timestamp":"2026-06-06T00:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
+{"timestamp":"2026-06-06T00:00:03.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}}

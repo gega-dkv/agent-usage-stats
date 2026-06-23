@@ -1,0 +1,8 @@
+{
+  "primaryModelId": "grok-3",
+  "modelsUsed": ["grok-3", "grok-3", "grok-3-mini"],
+  "totalTokensBeforeCompaction": 120000,
+  "contextTokensUsed": 45000,
+  "createdAt": "2026-05-10T08:00:00Z",
+  "lastMessageAt": "2026-06-15T17:30:00Z"
+}
