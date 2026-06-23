@@ -4,22 +4,37 @@
   "version": "0.1.0",
   "identifier": "com.agentusage.stats",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm --filter @agent-usage/desktop dev:fe",
+    "beforeBuildCommand": "pnpm --filter @agent-usage/desktop build:fe"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Agent Usage Stats",
         "width": 1280,
         "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
         "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "url": "index.html"
       }
     ],
     "security": {
-      "csp": "default-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:*; connect-src 'self' http://127.0.0.1:* http://localhost:*",
-      "capabilities": ["default"]
-    }
+      "csp": "default-src 'self'; img-src 'self' data: blob: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* ipc: http://ipc.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,
@@ -28,7 +43,10 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "DeveloperTool",
+    "publisher": "Agent Usage Stats"
   }
 }

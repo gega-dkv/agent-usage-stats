@@ -1,11 +1,23 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
+  "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for Agent Usage Stats desktop",
+  "description": "Capabilities for the main window: window controls (custom titlebar), events (native menu/tray bridge), and core APIs.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-maximized",
+    "core:window:allow-is-visible",
+    "core:event:default",
     "core:webview:default"
   ]
 }
