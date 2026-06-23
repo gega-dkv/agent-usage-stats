@@ -325,6 +325,23 @@ export const PROVIDER_REGISTRY: Record<Provider, ProviderDefinition> = {
     enabledByDefault: false,
     notes: 'Detection only — no stable public token/session schema.',
   },
+  grok: {
+    id: 'grok',
+    label: 'Grok',
+    pricingProvider: 'other',
+    // Grok's local `signals.json` exposes aggregate context-window token counts
+    // (totalTokensBeforeCompaction + contextTokensUsed) with no input/output
+    // split and no cost data, so we treat it as prompt-history-only.
+    supportLevel: 'prompt-history-only',
+    defaultConfidence: 'metadata-only',
+    storageKinds: ['json'],
+    envVars: ['GROK_DATA_DIR'],
+    defaultPaths: ['~/.grok/sessions/**/signals.json'],
+    detectDirs: ['~/.grok'],
+    hasParser: true,
+    enabledByDefault: false,
+    notes: 'Aggregate token counts only — no cost, no input/output split.',
+  },
 };
 
 /** All registered provider ids, in registry order. */

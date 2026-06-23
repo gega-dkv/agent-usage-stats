@@ -18,6 +18,7 @@ import { cursorParser } from './cursor.js';
 import { claudeParser } from './claude.js';
 import { geminiParser } from './gemini.js';
 import { codexParser } from './codex.js';
+import { grokParser } from './grok.js';
 
 /** Order matters: more specific `canParse` matchers first. */
 export const parsers: ProviderParser[] = [
@@ -40,6 +41,7 @@ export const parsers: ProviderParser[] = [
   claudeParser,
   geminiParser,
   codexParser,
+  grokParser,
 ];
 
 export function getParserForFile(filePath: string, sample: string): ProviderParser | null {
@@ -74,6 +76,7 @@ export { hermesParser } from './hermes.js';
 export { kiloParser } from './kilo.js';
 export { cursorParser } from './cursor.js';
 export { crushParser } from './crush.js';
+export { grokParser } from './grok.js';
 export {
   detectAgentInstallations,
   discoverSessionFiles,

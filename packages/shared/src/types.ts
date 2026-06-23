@@ -17,7 +17,8 @@ export type Provider =
   | 'aider'
   | 'cursor'
   | 'specstory'
-  | 'crush';
+  | 'crush'
+  | 'grok';
 
 export type PricingProvider =
   | 'openai'
