@@ -16,3 +16,4 @@ apps/web/.next
 apps/cli/web
 .idea
 IMPLEMENTATION_PLAN.md
+scanner.md
