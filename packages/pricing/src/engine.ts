@@ -32,13 +32,18 @@ export function calculateCost(
   cost += (totals.inputTokens / 1_000_000) * pricing.inputPerMillion;
   cost += (totals.outputTokens / 1_000_000) * pricing.outputPerMillion;
 
-  if (totals.cachedInputTokens > 0 && pricing.cachedInputPerMillion != null) {
-    cost += (totals.cachedInputTokens / 1_000_000) * pricing.cachedInputPerMillion;
-  } else if (totals.cacheReadTokens > 0 && pricing.cachedInputPerMillion != null) {
-    cost += (totals.cacheReadTokens / 1_000_000) * pricing.cachedInputPerMillion;
-  } else if (totals.cachedInputTokens > 0 || totals.cacheReadTokens > 0) {
-    const cached = totals.cachedInputTokens || totals.cacheReadTokens;
-    cost += (cached / 1_000_000) * pricing.inputPerMillion;
+  // Cache reads. When a provider reports the creation/read split (e.g. Claude),
+  // `cachedInputTokens` already folds in the cache-creation tokens, so pricing
+  // it here AND the cache-creation block below would double-charge creation.
+  // Use the explicit read count when the split is present; otherwise fall back
+  // to the combined `cachedInputTokens` (providers that report a single number).
+  const hasCacheSplit = totals.cacheCreationTokens > 0 || totals.cacheReadTokens > 0;
+  const cacheReadTokens = hasCacheSplit ? totals.cacheReadTokens : totals.cachedInputTokens;
+
+  if (cacheReadTokens > 0 && pricing.cachedInputPerMillion != null) {
+    cost += (cacheReadTokens / 1_000_000) * pricing.cachedInputPerMillion;
+  } else if (cacheReadTokens > 0) {
+    cost += (cacheReadTokens / 1_000_000) * pricing.inputPerMillion;
     isEstimated = true;
   }
 

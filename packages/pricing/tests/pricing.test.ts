@@ -52,6 +52,36 @@ describe('Pricing Engine', () => {
       expect(isEstimated).toBe(false);
     });
 
+    it('does not double-charge cache-creation tokens when the read/write split is present', () => {
+      // Claude-style totals: `cachedInputTokens` already folds in the
+      // cache-creation tokens. Reads must be priced from `cacheReadTokens`
+      // alone, with creation priced once at the write rate.
+      const claudePricing: ModelPricing = {
+        provider: 'anthropic',
+        model: 'claude-opus',
+        currency: 'USD',
+        inputPerMillion: 5,
+        outputPerMillion: 25,
+        cachedInputPerMillion: 0.5,
+        cacheWritePerMillion: 6.25,
+      };
+      const totals: TokenTotals = {
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+        cacheCreationTokens: 2_000_000,
+        cacheReadTokens: 8_000_000,
+        cachedInputTokens: 10_000_000, // creation + read (combined)
+        reasoningTokens: 0,
+        totalTokens: 12_000_000,
+      };
+
+      const { cost } = calculateCost(totals, claudePricing);
+
+      // input + output + reads(8M @0.5) + creation(2M @6.25); creation NOT also
+      // billed at the read rate via the combined cachedInputTokens.
+      expect(cost).toBeCloseTo(1 * 5 + 1 * 25 + 8 * 0.5 + 2 * 6.25, 6);
+    });
+
     it('should include reasoning cost when a dedicated rate exists', () => {
       const totals: TokenTotals = {
         inputTokens: 100000,

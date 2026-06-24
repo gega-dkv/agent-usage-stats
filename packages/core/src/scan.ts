@@ -5,6 +5,7 @@ import type {
   AppConfig,
   ParserWarning,
   NormalizedSession,
+  NormalizedMessage,
   PricingSource,
   PrivacyMode,
 } from '@agent-usage/shared';
@@ -14,6 +15,7 @@ import {
   safeParseAppConfig,
   PROVIDER_REGISTRY,
   normalizeTokenTotals,
+  totalsFromMessages,
 } from '@agent-usage/shared';
 import type { ModelPricing, PricingProfile, PricingProvider } from '@agent-usage/shared';
 import { discoverSessionFiles, getParserForFile, sanitizeMessageForPrivacy } from '@agent-usage/parsers';
@@ -33,7 +35,6 @@ import {
   upsertSession,
 } from '@agent-usage/db';
 import { calculateCost, lookupPricing, getDefaultPricingModels } from '@agent-usage/pricing';
-import type { PricingLookupResult } from '@agent-usage/pricing';
 
 export type ScanResult = {
   filesScanned: number;
@@ -115,15 +116,7 @@ export async function scanSessions(
           const sessionId = upsertSession(db, session, fileHash) as string;
 
           const sessionModel = pickSessionModel(session);
-          const pricing = lookupPricing(
-            sessionModel,
-            providerToPricingProvider(session.provider),
-            pricingModels,
-            'api-standard',
-            config.modelAliases,
-          );
-
-          const costResult = resolveSessionCost(session, pricing, config);
+          const costResult = resolveSessionCost(session, pricingModels, config);
           updateSessionCosts(db, sessionId, {
             estimatedCost: costResult.displayCost,
             simulatedCost: costResult.simulatedCost,
@@ -232,7 +225,7 @@ export function enrichSession(
 
 function resolveSessionCost(
   session: NormalizedSession,
-  pricing: PricingLookupResult,
+  pricingModels: ModelPricing[],
   config: AppConfig,
 ): {
   displayCost: number;
@@ -242,16 +235,41 @@ function resolveSessionCost(
   pricingSource: PricingSource;
 } {
   const recordedCost = session.costs?.recordedCost ?? session.metadata?.recordedCost as number | undefined;
-  const pricingSource = pricingSourceFromLookup(pricing);
 
+  // A session usually spans several models (e.g. Opus + Sonnet + Haiku), so we
+  // price each model's tokens with its own rates and sum, rather than charging
+  // the whole session at a single model's rates.
+  const provider = providerToPricingProvider(session.provider);
   let simulatedCost = 0;
-  let costEstimated = true;
+  let anyPriced = false;
+  let anyEstimated = false;
+  let anyFallback = false;
 
-  if (pricing.pricing) {
-    const { cost, isEstimated } = calculateCost(session.totals, pricing.pricing);
-    simulatedCost = cost;
-    costEstimated = isEstimated || pricing.isEstimated;
+  for (const [model, messages] of groupMessagesByModel(session.messages)) {
+    const groupTotals = totalsFromMessages(messages);
+    if (groupTotals.totalTokens === 0) continue;
+
+    const lookup = lookupPricing(
+      model || undefined,
+      provider,
+      pricingModels,
+      'api-standard',
+      config.modelAliases,
+    );
+
+    if (lookup.pricing) {
+      const { cost, isEstimated } = calculateCost(groupTotals, lookup.pricing);
+      simulatedCost += cost;
+      anyPriced = true;
+      if (isEstimated || lookup.isEstimated) anyEstimated = true;
+      if (lookup.isEstimated) anyFallback = true;
+    } else {
+      anyEstimated = true;
+    }
   }
+
+  const pricingSource: PricingSource = !anyPriced ? 'none' : anyFallback ? 'fallback' : 'exact';
+  const costEstimated = anyEstimated || !anyPriced;
 
   session.costs = {
     recordedCost,
@@ -273,10 +291,26 @@ function resolveSessionCost(
   };
 }
 
-function pricingSourceFromLookup(pricing: PricingLookupResult): PricingSource {
-  if (!pricing.pricing) return 'none';
-  if (pricing.isEstimated) return 'fallback';
-  return 'exact';
+/** Group a session's messages by model id (empty string for model-less rows). */
+function groupMessagesByModel(messages: NormalizedMessage[]): Map<string, NormalizedMessage[]> {
+  const byModel = new Map<string, NormalizedMessage[]>();
+  for (const message of messages) {
+    const key = message.model ?? '';
+    const list = byModel.get(key);
+    if (list) list.push(message);
+    else byModel.set(key, [message]);
+  }
+  return byModel;
+}
+
+/** Tokens attributable to a single message, used to weight the session model. */
+function messageTokenWeight(message: NormalizedMessage): number {
+  return (
+    (message.inputTokens || 0) +
+    (message.outputTokens || 0) +
+    (message.cacheCreationTokens || 0) +
+    (message.cacheReadTokens || message.cachedInputTokens || 0)
+  );
 }
 
 function ensurePricingModels(db: AppDatabase['db']): ModelPricing[] {
@@ -303,11 +337,35 @@ function ensurePricingModels(db: AppDatabase['db']): ModelPricing[] {
   return normalizeStoredPricing(getPricingModels(db));
 }
 
+/**
+ * The model shown for a session: the one that did the most work (most tokens),
+ * not merely the first one seen. Sessions commonly span several models, so the
+ * first message's model is often a small router/title call rather than the one
+ * the user actually worked with.
+ */
 function pickSessionModel(session: NormalizedSession): string | undefined {
+  const byModel = new Map<string, number>();
   for (const message of session.messages) {
-    if (message.model) return message.model;
+    if (!message.model) continue;
+    byModel.set(message.model, (byModel.get(message.model) ?? 0) + messageTokenWeight(message));
   }
-  return undefined;
+
+  let best: string | undefined;
+  let bestTokens = -1;
+  for (const [model, tokens] of byModel) {
+    if (tokens > bestTokens) {
+      bestTokens = tokens;
+      best = model;
+    }
+  }
+
+  // No model carried tokens — fall back to the first model seen at all.
+  if (best === undefined) {
+    for (const message of session.messages) {
+      if (message.model) return message.model;
+    }
+  }
+  return best;
 }
 
 function normalizeStoredPricing(models: ReturnType<typeof getPricingModels>): ModelPricing[] {

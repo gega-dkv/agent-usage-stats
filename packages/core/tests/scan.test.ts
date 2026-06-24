@@ -36,6 +36,10 @@ const multiSessionFixture = path.join(
   __dirname,
   '../../parsers/tests/fixtures/claude/multi-session.jsonl',
 );
+const multiModelFixture = path.join(
+  __dirname,
+  '../../parsers/tests/fixtures/claude/multi-model.jsonl',
+);
 
 describe('scan pipeline integration', () => {
   let dbPath: string;
@@ -71,6 +75,26 @@ describe('scan pipeline integration', () => {
     const summary = getStatsSummary(database.db);
     expect(summary.totalSessions).toBeGreaterThan(0);
     expect(summary.totalTokens).toBeGreaterThan(0);
+  });
+
+  it('prices each model in a session separately and shows the dominant model', async () => {
+    const config = getDefaultConfig();
+    await scanSessions(database, config, {
+      paths: [multiModelFixture],
+      provider: 'claude',
+      force: true,
+    });
+
+    const row = database.sqlite
+      .prepare('SELECT model, estimated_cost FROM sessions LIMIT 1')
+      .get() as { model: string; estimated_cost: number };
+
+    // Opus carries ~1M in + 1M out; haiku carries ~1k. The session is shown as
+    // the model that did the most work, not the first one seen.
+    expect(row.model).toBe('claude-opus-4-8');
+    // Opus input ($5/M) + output ($25/M) ≈ $30. If the whole session were
+    // mispriced at the (much cheaper) haiku rates, this would be ~$5.
+    expect(row.estimated_cost).toBeGreaterThan(20);
   });
 
   it('persists usage confidence and support level from registry defaults', async () => {

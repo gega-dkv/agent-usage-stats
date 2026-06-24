@@ -83,24 +83,39 @@ describe('Shared Utils', () => {
   });
 
   describe('formatNumber', () => {
+    it('should format billions', () => {
+      expect(formatNumber(1079210000)).toBe('1.08B');
+    });
+
     it('should format millions', () => {
       expect(formatNumber(1500000)).toBe('1.5M');
     });
 
-    it('should format thousands', () => {
-      expect(formatNumber(1500)).toBe('1.5K');
+    it('should format thousands with a lowercase k', () => {
+      expect(formatNumber(1500)).toBe('1.5k');
+      expect(formatNumber(1000)).toBe('1k');
     });
 
-    it('should format small numbers', () => {
+    it('should trim trailing zeros and format small numbers', () => {
       expect(formatNumber(42)).toBe('42');
+      expect(formatNumber(999)).toBe('999');
+    });
+
+    it('should guard rounding boundaries', () => {
+      expect(formatNumber(999999)).toBe('1M');
+      expect(formatNumber(999999999)).toBe('1B');
+    });
+
+    it('should handle negatives and non-finite values', () => {
+      expect(formatNumber(-2500)).toBe('-2.5k');
+      expect(formatNumber(NaN)).toBe('0');
     });
   });
 
   describe('formatCurrency', () => {
-    it('should format currency', () => {
-      const result = formatCurrency(12.34);
-      expect(result).toContain('12.34');
-      expect(result).toContain('$');
+    it('should format currency with exactly two decimals', () => {
+      expect(formatCurrency(12.34)).toBe('$12.34');
+      expect(formatCurrency(0.1234)).toBe('$0.12');
     });
   });
 

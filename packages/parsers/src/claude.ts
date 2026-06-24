@@ -56,10 +56,19 @@ export const claudeParser: ProviderParser = {
 
   canParse(filePath: string, sample: string): boolean {
     if (!filePath.endsWith('.jsonl')) return false;
+
+    // Path is the most reliable signal: Claude Code session logs live under
+    // `.claude/projects/`. A session often opens with large metadata rows
+    // (file-history snapshots, queue operations) that push the first real
+    // message past the caller's ~4 KB content sample, so a content-only check
+    // misses most real sessions and they get silently dropped on sync.
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    if (normalizedPath.includes('/.claude/projects/')) return true;
+
     try {
       const lines = sample.split('\n').filter(Boolean);
       if (lines.length === 0) return false;
-      // Check first few lines for a Claude message record
+      // Check first few lines for a Claude conversation or metadata record.
       for (const line of lines.slice(0, 10)) {
         try {
           const r = JSON.parse(line);
@@ -71,6 +80,14 @@ export const claudeParser: ProviderParser = {
             r.role === 'assistant' ||
             r.role === 'human' ||
             r.type === 'summary' ||
+            // Claude Code session metadata rows — distinctive to its JSONL
+            // format and frequently the only complete records in the sample.
+            r.type === 'last-prompt' ||
+            r.type === 'queue-operation' ||
+            r.type === 'file-history-snapshot' ||
+            r.type === 'permission-mode' ||
+            r.type === 'mode' ||
+            r.type === 'ai-title' ||
             (typeof r.uuid === 'string' && typeof r.type === 'string')
           ) {
             return true;
@@ -152,6 +169,11 @@ async function parseClaudeJsonl(
       const usage = nested?.usage ?? record.usage ?? {};
       const model = nested?.model ?? record.model;
       const messageId = nested?.id ?? record.uuid;
+
+      // `<synthetic>` rows are local-only placeholders Claude Code injects (API
+      // errors, interrupted turns). They carry no real usage, so skip them
+      // rather than counting zeros or fabricating a text estimate.
+      if (model === '<synthetic>') continue;
 
       const cacheCreationTokens = usage.cache_creation_input_tokens;
       const cacheReadTokens = usage.cache_read_input_tokens;

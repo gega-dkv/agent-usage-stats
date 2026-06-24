@@ -10,14 +10,17 @@ import {
 
 describe('format helpers', () => {
   describe('formatNumber', () => {
+    it('formats billions', () => {
+      expect(formatNumber(1_079_210_000)).toBe('1.08B');
+    });
     it('formats millions', () => {
-      expect(formatNumber(1_500_000)).toBe('1.50M');
+      expect(formatNumber(1_500_000)).toBe('1.5M');
     });
-    it('formats thousands', () => {
-      expect(formatNumber(2500)).toBe('2.5K');
+    it('formats thousands with a lowercase k', () => {
+      expect(formatNumber(2500)).toBe('2.5k');
     });
-    it('formats small numbers with locale separators', () => {
-      expect(formatNumber(1234)).toBe('1.2K');
+    it('trims trailing zeros and formats small numbers', () => {
+      expect(formatNumber(1234)).toBe('1.2k');
       expect(formatNumber(999)).toBe('999');
     });
     it('handles non-finite values', () => {

@@ -1,8 +1,13 @@
-/** Compact number formatting for chart axes and tooltips. */
+import { formatNumber } from '@agent-usage/shared';
+
+/**
+ * Compact number formatting for chart axes and tooltips. Reuses the canonical
+ * token format (k / M / B) so axes match the stat cards and tables; sub-1000
+ * tick values are rounded to keep axis labels clean.
+ */
 export function shortNumber(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return Math.round(n).toString();
+  if (Math.abs(n) < 1_000) return Math.round(n).toLocaleString();
+  return formatNumber(n);
 }
 
 export const CHART_COLORS = [

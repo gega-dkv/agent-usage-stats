@@ -1,5 +1,5 @@
 import chalk, { type ChalkInstance } from 'chalk';
-import type { Provider } from '@agent-usage/shared';
+import { formatNumber, formatCurrency, type Provider } from '@agent-usage/shared';
 
 export const palette = {
   primary: chalk.cyan,
@@ -567,11 +567,9 @@ export function printActivityCalendar(days: ActivityDay[], options?: ActivityCal
 }
 
 function formatActivityValue(value: number, metric: string): string {
-  if (metric === 'cost') return `$${value.toFixed(2)}`;
+  if (metric === 'cost') return formatCurrency(value);
   if (metric === 'sessions') return `${Math.round(value)} sessions`;
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M tokens`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K tokens`;
-  return `${Math.round(value)} tokens`;
+  return `${formatNumber(value)} tokens`;
 }
 
 export class Spinner {

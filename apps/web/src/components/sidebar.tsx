@@ -117,6 +117,7 @@ export function Sidebar({
                   const Icon = item.icon;
                   const link = (
                     <Link
+                      key={item.href}
                       href={item.href}
                       onClick={onMobileClose}
                       aria-current={active ? 'page' : undefined}

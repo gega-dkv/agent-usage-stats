@@ -4,7 +4,7 @@ import { shortNumber, CHART_COLORS } from '../src/charts/chart-utils.js';
 describe('chart utils', () => {
   it('shortNumber formats compact values', () => {
     expect(shortNumber(42)).toBe('42');
-    expect(shortNumber(1500)).toBe('1.5K');
+    expect(shortNumber(1500)).toBe('1.5k');
     expect(shortNumber(2_500_000)).toBe('2.5M');
   });
 

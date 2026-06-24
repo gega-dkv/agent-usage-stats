@@ -3,12 +3,9 @@ import { providerTheme, providerHsl } from './provider-theme';
 // Re-export so existing imports of providerLabel from format keep working.
 export { providerLabel } from './provider-theme';
 
-export function formatNumber(n: number): string {
-  if (!Number.isFinite(n)) return '0';
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString();
-}
+// Single source of truth for the compact token format (k / M / B), shared with
+// the CLI, charts, and the desktop app.
+export { formatNumber } from '@agent-usage/shared';
 
 /**
  * Format a number as a currency string. Currency defaults to USD but can be
@@ -37,13 +34,13 @@ const CURRENCY_LOCALE: Record<string, string> = {
 
 export function formatCurrency(n: number, currency?: string): string {
   const cur = (currency || currencyOverride).toUpperCase();
-  const minFrac = cur === 'JPY' ? 0 : 2;
+  const frac = cur === 'JPY' ? 0 : 2;
   try {
     return new Intl.NumberFormat(CURRENCY_LOCALE[cur] ?? 'en-US', {
       style: 'currency',
       currency: cur,
-      minimumFractionDigits: minFrac,
-      maximumFractionDigits: minFrac === 0 ? 0 : 4,
+      minimumFractionDigits: frac,
+      maximumFractionDigits: frac,
     }).format(n);
   } catch {
     // Fallback if Intl doesn't recognize the currency code.

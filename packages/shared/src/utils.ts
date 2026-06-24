@@ -80,18 +80,44 @@ export function providerToPricingProvider(provider: Provider): PricingProvider {
   return PROVIDER_REGISTRY[provider]?.pricingProvider ?? 'other';
 }
 
+/**
+ * Compact number formatting with k / M / B suffixes — the canonical token
+ * format shared by the desktop app, web dashboard, CLI, and charts:
+ *   999 → "999", 1_000 → "1k", 1_500 → "1.5k",
+ *   1_000_000 → "1M", 1_079_210_000 → "1.08B".
+ * Trailing zeros are trimmed (`Number(...)`), so round values read cleanly.
+ */
 export function formatNumber(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  if (!Number.isFinite(n)) return '0';
+  const abs = Math.abs(n);
+  const sign = n < 0 ? '-' : '';
+  // Round the mantissa to `decimals`, trimming trailing zeros via Number(...).
+  const mantissa = (div: number, decimals: number) => Number((abs / div).toFixed(decimals));
+
+  if (abs >= 1_000_000_000) return `${sign}${mantissa(1_000_000_000, 2)}B`;
+  if (abs >= 1_000_000) {
+    const m = mantissa(1_000_000, 2);
+    // Guard the rounding boundary: 999_999_999 → "1B", not "1000M".
+    return m >= 1000 ? `${sign}${mantissa(1_000_000_000, 2)}B` : `${sign}${m}M`;
+  }
+  if (abs >= 1_000) {
+    const m = mantissa(1_000, 1);
+    // 999_999 → "1M", not "1000k".
+    return m >= 1000 ? `${sign}${mantissa(1_000_000, 2)}M` : `${sign}${m}k`;
+  }
   return n.toLocaleString();
 }
 
+/**
+ * Format a USD amount with exactly two fraction digits, matching the desktop
+ * app's currency style (e.g. "$1.23").
+ */
 export function formatCurrency(n: number): string {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
+    maximumFractionDigits: 2,
   }).format(n);
 }
 

@@ -25,6 +25,28 @@ describe('Claude Parser', () => {
     expect(claudeParser.canParse('/path/to/file.json', sample)).toBe(false);
   });
 
+  it('should detect sessions whose sample holds only metadata rows', () => {
+    // Real sessions often open with metadata rows (last-prompt, mode, queue
+    // operations); the first user/assistant message can sit past the ~4 KB
+    // content sample. Detection must not depend on a conversation row appearing.
+    const sample = [
+      `{"type":"last-prompt","leafUuid":"x","sessionId":"s1"}`,
+      `{"type":"mode","mode":"default","sessionId":"s1"}`,
+      `{"type":"permission-mode","permissionMode":"default","sessionId":"s1"}`,
+    ].join('\n');
+    expect(claudeParser.canParse('/tmp/relocated/s1.jsonl', sample)).toBe(true);
+  });
+
+  it('should detect Claude session files by path when the sample is truncated', () => {
+    // A huge first record (e.g. a sidechain prompt) can exceed the sample, so
+    // the sample is a single unparseable fragment. The `.claude/projects/` path
+    // is the reliable fallback so these sessions are not silently dropped.
+    const truncated = `{"type":"user","message":{"role":"user","content":"${'x'.repeat(50)}`;
+    expect(
+      claudeParser.canParse('/Users/me/.claude/projects/proj/agent-abc.jsonl', truncated),
+    ).toBe(true);
+  });
+
   it('should parse valid Claude session files', async () => {
     const result = await claudeParser.parse(fixture('claude', 'valid'));
 
