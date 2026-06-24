@@ -5,7 +5,7 @@
   "messages": [
     {
       "role": "user",
-      "parts": [{"text": "Write a function to calculate Fibonacci numbers"}],
+      "parts": [{ "text": "Write a function to calculate Fibonacci numbers" }],
       "usageMetadata": {
         "promptTokenCount": 1200,
         "candidatesTokenCount": 0,
@@ -15,7 +15,7 @@
     },
     {
       "role": "model",
-      "parts": [{"text": "Here's an efficient Fibonacci function using iteration:"}],
+      "parts": [{ "text": "Here's an efficient Fibonacci function using iteration:" }],
       "model": "gemini-2.5-pro",
       "usageMetadata": {
         "promptTokenCount": 0,
@@ -26,7 +26,7 @@
     },
     {
       "role": "user",
-      "parts": [{"text": "Can you add memoization to it?"}],
+      "parts": [{ "text": "Can you add memoization to it?" }],
       "usageMetadata": {
         "promptTokenCount": 1500,
         "candidatesTokenCount": 0,
@@ -36,12 +36,14 @@
     },
     {
       "role": "model",
-      "parts": [{"text": "Here's the memoized version:"}],
+      "parts": [{ "text": "Here's the memoized version:" }],
       "model": "gemini-2.5-pro",
       "usageMetadata": {
-        "promptTokenCount": 0,
+        "promptTokenCount": 1600,
         "candidatesTokenCount": 400,
-        "totalTokenCount": 400
+        "thoughtsTokenCount": 60,
+        "cachedContentTokenCount": 1200,
+        "totalTokenCount": 860
       },
       "createTime": "2026-06-17T15:01:00Z"
     }

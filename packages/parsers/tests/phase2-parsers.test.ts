@@ -60,6 +60,29 @@ describe('Phase 2 provider parsers', () => {
     expect(corrupt.sessions).toHaveLength(1);
   });
 
+  it('qwen subtracts cached content from input and splits cache/reasoning (§2/§5)', async () => {
+    const valid = await parseFixture(qwenParser, 'qwen', 'valid');
+    const messages = valid.sessions[0].messages;
+
+    // The model turn reports promptTokenCount=2000 incl. cachedContent=1200
+    // → uncached input must be 800, cacheRead must be 1200, thoughts 80.
+    const modelTurn = messages.find((m) => m.role === 'assistant');
+    expect(modelTurn?.inputTokens).toBe(800);
+    expect(modelTurn?.cacheReadTokens).toBe(1200);
+    expect(modelTurn?.reasoningTokens).toBe(80);
+
+    // Totals must NOT double-count the cached portion.
+    expect(valid.sessions[0].totals.cacheReadTokens).toBe(1200);
+    expect(valid.sessions[0].totals.inputTokens).toBeLessThan(2000 + 1200);
+  });
+
+  it('qwen parses whole-file JSON session (Gemini-fork session-*.json)', async () => {
+    const json = await qwenParser.parse(fixture('qwen', 'valid', 'json'));
+    expect(json.sessions).toHaveLength(1);
+    expect(json.sessions[0].totals.inputTokens).toBeGreaterThan(0);
+    expect(json.sessions[0].totals.cacheReadTokens).toBeGreaterThan(0);
+  });
+
   it('openclaw parses valid fixtures with recorded cost', async () => {
     const result = await parseFixture(openclawParser, 'openclaw', 'valid');
     expect(result.sessions).toHaveLength(1);
@@ -104,7 +127,11 @@ describe('Phase 2 provider parsers', () => {
     const estimated = await aiderParser.parse(fixture('aider', 'missing-fields'), {
       privacyMode: 'preview',
       estimatePromptOnlySources: true,
-      providers: { claude: { enabled: true, paths: [] }, codex: { enabled: true, paths: [] }, gemini: { enabled: true, paths: [] } },
+      providers: {
+        claude: { enabled: true, paths: [] },
+        codex: { enabled: true, paths: [] },
+        gemini: { enabled: true, paths: [] },
+      },
       customPaths: [],
       currency: 'USD',
       storeRawRecords: false,
@@ -122,6 +149,15 @@ describe('Phase 2 provider parsers', () => {
     const result = await parseFixture(copilotParser, 'copilot', 'valid');
     expect(result.sessions.length).toBeGreaterThan(0);
     expect(result.sessions[0].totals.inputTokens).toBeGreaterThan(0);
+  });
+
+  it('copilot parses session-state events.jsonl session.shutdown metrics (§4.146)', async () => {
+    const result = await parseFixture(copilotParser, 'copilot', 'session-state');
+    expect(result.sessions.length).toBeGreaterThan(0);
+    expect(result.sessions[0].totals.inputTokens).toBe(850);
+    expect(result.sessions[0].totals.outputTokens).toBe(410);
+    expect(result.sessions[0].totals.cacheReadTokens).toBe(200);
+    expect(result.sessions[0].messages.some((m) => m.model === 'claude-sonnet-4')).toBe(true);
   });
 
   it('copilot warns when OpenTelemetry export is missing or empty', async () => {
@@ -186,7 +222,9 @@ describe('Phase 2 provider parsers', () => {
     ] as const) {
       const result = await parseFixture(parser, provider, 'valid');
       expect(result.sessions.length).toBeGreaterThan(0);
-      expect(result.sessions[0].totals.inputTokens + result.sessions[0].totals.outputTokens).toBeGreaterThan(0);
+      expect(
+        result.sessions[0].totals.inputTokens + result.sessions[0].totals.outputTokens,
+      ).toBeGreaterThan(0);
     }
   });
 

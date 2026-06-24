@@ -2,7 +2,13 @@
 
 import { useMemo } from 'react';
 import { AlertTriangle, Info } from 'lucide-react';
-import { UsageLineChart, UsageBarChart, ProviderDonutChart, CalendarHeatmap, ModelCostRanking } from '@agent-usage/ui';
+import {
+  UsageLineChart,
+  UsageBarChart,
+  ProviderDonutChart,
+  CalendarHeatmap,
+  ModelCostRanking,
+} from '@agent-usage/ui';
 import { useQuery } from '@/lib/use-query';
 import { fetchJson } from '@/lib/fetcher';
 import { useUrlFilters } from '@/lib/use-filters';
@@ -54,7 +60,8 @@ export function DashboardClient() {
       metric: filters.metric,
     });
     if (filters.provider && filters.provider !== 'all') params.set('provider', filters.provider);
-    if (filters.usageConfidence && filters.usageConfidence !== 'all') params.set('usageConfidence', filters.usageConfidence);
+    if (filters.usageConfidence && filters.usageConfidence !== 'all')
+      params.set('usageConfidence', filters.usageConfidence);
     if (filters.range === 'custom') {
       if (filters.customFrom) params.set('from', filters.customFrom);
       if (filters.customTo) params.set('to', filters.customTo);
@@ -102,8 +109,8 @@ export function DashboardClient() {
   const modelRankingData = (data?.costByModel ?? []).map((d) => ({
     model: d.label,
     cost: d.value,
-    tokens: 0,
-    sessions: 0,
+    tokens: d.tokens ?? 0,
+    sessions: d.sessions ?? 0,
   }));
 
   const groupedTotal = groupedChart.reduce((sum, d) => sum + d.value, 0);
@@ -160,7 +167,9 @@ export function DashboardClient() {
                 <CardTitle className="text-sm font-semibold">
                   {metricLabel(filters.metric as Metric)} over time
                 </CardTitle>
-                <CardDescription className="text-xs">{filters.granularity} granularity</CardDescription>
+                <CardDescription className="text-xs">
+                  {filters.granularity} granularity
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <UsageLineChart data={timeSeriesChart} height={260} formatValue={formatMetric} />
@@ -194,7 +203,11 @@ export function DashboardClient() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <UsageBarChart data={groupedChart} formatValue={formatMetric} colorFor={colorForGroup} />
+                <UsageBarChart
+                  data={groupedChart}
+                  formatValue={formatMetric}
+                  colorFor={colorForGroup}
+                />
               </CardContent>
             </Card>
             <Card>
@@ -226,7 +239,10 @@ export function DashboardClient() {
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <SessionTable title="Recent sessions" sessions={data?.recentSessions ?? []} />
-            <SessionTable title="Most expensive sessions" sessions={data?.expensiveSessions ?? []} />
+            <SessionTable
+              title="Most expensive sessions"
+              sessions={data?.expensiveSessions ?? []}
+            />
           </div>
 
           <QualityBanner
@@ -245,7 +261,9 @@ function DashboardHeader({ onSync }: { onSync: () => void }) {
     <div className="flex flex-wrap items-center justify-between gap-4">
       <div>
         <h2 className="text-xl font-bold tracking-tight">Overview</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">Local-first view of your AI session usage and costs</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Local-first view of your AI session usage and costs
+        </p>
       </div>
       <ScanButton onComplete={onSync} />
     </div>
@@ -267,15 +285,25 @@ function QualityBanner({
     <div
       className={
         'flex items-start gap-3 rounded-lg border px-4 py-3 ' +
-        (isWarning
-          ? 'border-warning/30 bg-warning/10'
-          : 'border-info/30 bg-info/10')
+        (isWarning ? 'border-warning/30 bg-warning/10' : 'border-info/30 bg-info/10')
       }
     >
-      <Icon className={isWarning ? 'mt-0.5 h-4 w-4 shrink-0 text-warning' : 'mt-0.5 h-4 w-4 shrink-0 text-info'} />
+      <Icon
+        className={
+          isWarning ? 'mt-0.5 h-4 w-4 shrink-0 text-warning' : 'mt-0.5 h-4 w-4 shrink-0 text-info'
+        }
+      />
       <div className="min-w-0">
-        <p className={isWarning ? 'text-sm font-medium text-warning' : 'text-sm font-medium text-info'}>{title}</p>
-        <p className={isWarning ? 'mt-0.5 text-xs text-warning/80' : 'mt-0.5 text-xs text-info/80'}>{description}</p>
+        <p
+          className={
+            isWarning ? 'text-sm font-medium text-warning' : 'text-sm font-medium text-info'
+          }
+        >
+          {title}
+        </p>
+        <p className={isWarning ? 'mt-0.5 text-xs text-warning/80' : 'mt-0.5 text-xs text-info/80'}>
+          {description}
+        </p>
       </div>
     </div>
   );

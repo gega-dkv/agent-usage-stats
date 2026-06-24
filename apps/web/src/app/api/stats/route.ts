@@ -15,7 +15,11 @@ export const dynamic = 'force-dynamic';
  * Compute the date range for the "previous period" — the equal-length window
  * immediately before the current `from`. Used to power trend deltas on KPI cards.
  */
-function previousRange(range: TimeRange, from?: string, to?: string): { from?: string; to?: string } {
+function previousRange(
+  range: TimeRange,
+  from?: string,
+  to?: string,
+): { from?: string; to?: string } {
   if (!from) return {};
   const startMs = new Date(from).getTime();
   if (Number.isNaN(startMs)) return {};
@@ -70,6 +74,7 @@ export async function GET(request: Request) {
       getMonthlyUsage,
       getYearlyUsage,
       getGroupedUsage,
+      getModelCostBreakdown,
       getSessions,
     } = await import('@agent-usage/db');
 
@@ -100,14 +105,7 @@ export async function GET(request: Request) {
       usageConfidence,
     });
 
-    const costByModel = getGroupedUsage(database.db, {
-      groupBy: 'model',
-      metric: 'cost',
-      from,
-      to,
-      provider,
-      usageConfidence,
-    }).slice(0, 10);
+    const costByModel = getModelCostBreakdown(database.db, { from, to, provider, usageConfidence });
 
     const providerComparison = getGroupedUsage(database.db, {
       groupBy: 'provider',

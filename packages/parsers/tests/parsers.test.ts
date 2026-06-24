@@ -9,9 +9,9 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = path.join(__dirname, 'fixtures');
 
-function fixture(provider: string, name: string) {
-  const ext = provider === 'gemini' ? 'json' : 'jsonl';
-  return path.join(fixturesDir, provider, `${name}.${ext}`);
+function fixture(provider: string, name: string, ext?: string) {
+  const resolvedExt = ext ?? (provider === 'gemini' ? 'json' : 'jsonl');
+  return path.join(fixturesDir, provider, `${name}.${resolvedExt}`);
 }
 
 describe('Claude Parser', () => {
@@ -160,6 +160,87 @@ describe('Gemini Parser', () => {
     expect(result.sessions[0].messages.length).toBe(4);
     expect(result.sessions[0].totals.inputTokens).toBeGreaterThan(0);
     expect(result.sessions[0].totals.outputTokens).toBeGreaterThan(0);
+  });
+
+  it('subtracts cached tokens from input and splits cache/reasoning (§2/§5)', async () => {
+    const result = await geminiParser.parse(fixture('gemini', 'valid'));
+    const sessions = result.sessions[0];
+
+    // The last model turn reports promptTokenCount=1600 incl. cachedContent=1200
+    // → uncached input must be 400, cacheRead must be 1200, thoughts 60.
+    const cachedTurn = sessions.messages[3];
+    expect(cachedTurn.inputTokens).toBe(400);
+    expect(cachedTurn.cacheReadTokens).toBe(1200);
+    expect(cachedTurn.cachedInputTokens).toBe(1200);
+    expect(cachedTurn.reasoningTokens).toBe(60);
+
+    // Totals must NOT double-count the cached portion (input + cacheRead).
+    expect(sessions.totals.cacheReadTokens).toBe(1200);
+  });
+
+  it('detects real CLI .json snapshots from a truncated sample', () => {
+    // The scanner only reads the first 4 KB; a multi-MB snapshot must still be
+    // recognized from its leading keys without a full JSON.parse.
+    const sample =
+      '{\n  "sessionId": "abc",\n  "projectHash": "123",\n  "startTime": "2026-05-13T11:05:32.395Z",\n  "lastUpdated": "';
+    expect(geminiParser.canParse('/home/u/.gemini/tmp/proj/chats/session-x.json', sample)).toBe(
+      true,
+    );
+  });
+
+  it('parses the real CLI .json snapshot (tokens block, type:gemini, info skipped)', async () => {
+    const result = await geminiParser.parse(fixture('gemini', 'cli-snapshot', 'json'));
+    expect(result.sessions).toHaveLength(1);
+    const session = result.sessions[0];
+    expect(session.id).toBe('cli-snapshot-1');
+    expect(session.startedAt).toBe('2026-05-13T11:05:32.395Z');
+
+    // The `info` banner is local-only → skipped (5 conversational msgs remain).
+    expect(session.messages.length).toBe(4);
+    expect(session.messages.some((m) => m.role === 'system')).toBe(false);
+
+    // First model turn: input=9233 cached=0 → uncached 9233.
+    const first = session.messages.find((m) => m.id === 'msg-gemini-1');
+    expect(first?.model).toBe('gemini-3-flash-preview');
+    expect(first?.inputTokens).toBe(9233);
+    expect(first?.outputTokens).toBe(70);
+    expect(first?.reasoningTokens).toBe(334);
+
+    // Second model turn: input=12000 cached=11000 → uncached 1000, cacheRead 11000.
+    const second = session.messages.find((m) => m.id === 'msg-gemini-2');
+    expect(second?.inputTokens).toBe(1000);
+    expect(second?.cacheReadTokens).toBe(11000);
+    expect(second?.reasoningTokens).toBe(50);
+
+    // Totals split cache out of input (no double-count).
+    expect(session.totals.cacheReadTokens).toBe(11000);
+    expect(session.totals.inputTokens).toBe(10233); // 9233 + 1000
+  });
+
+  it('parses the real CLI .jsonl event log (dedup streaming dupes, $set patches)', async () => {
+    const result = await geminiParser.parse(fixture('gemini', 'cli-snapshot', 'jsonl'));
+    expect(result.warnings).toHaveLength(0);
+    expect(result.sessions).toHaveLength(1);
+    const session = result.sessions[0];
+    expect(session.id).toBe('cli-jsonl-1');
+
+    // Each gemini message appears twice (streaming) — must dedup by id.
+    const geminiMsgs = session.messages.filter((m) => m.role === 'assistant');
+    expect(geminiMsgs).toHaveLength(2);
+
+    // Last write wins: the duplicated j-gemini-1 keeps its final content.
+    const first = session.messages.find((m) => m.id === 'j-gemini-1');
+    expect(first?.contentPreview).toContain('This function does X');
+    expect(first?.inputTokens).toBe(11446);
+    expect(first?.cacheReadTokens).toBe(0);
+
+    // Second turn has cached tokens subtracted: 12271 - 11387 = 884.
+    const second = session.messages.find((m) => m.id === 'j-gemini-2');
+    expect(second?.inputTokens).toBe(884);
+    expect(second?.cacheReadTokens).toBe(11387);
+
+    // The $set patches updated lastUpdated on the session.
+    expect(session.updatedAt).toBe('2026-05-13T13:44:00.000Z');
   });
 
   it('should parse legacy top-level fixture', async () => {

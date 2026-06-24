@@ -1,5 +1,10 @@
 import path from 'path';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
 import {
   applyPrivacyContent,
   buildSession,
@@ -54,17 +59,37 @@ export const copilotParser: ProviderParser = {
           const isInference =
             spanKind.includes('inference') || String(record.name).includes('inference');
           const isAgentTurn = spanKind.includes('agent') || String(record.name).includes('agent');
-          if (!isChat && !isInference && !isAgentTurn) return;
+          // Doc §4.146: the primary source is per-session `events.jsonl`, where
+          // per-model metrics live in `session.shutdown` events. Those carry the
+          // same `gen_ai.usage.*` attributes as OTel spans, so accept any record
+          // with usage metrics in addition to the span-kind matchers above.
+          const hasUsageMetrics =
+            attrs['gen_ai.usage.input_tokens'] != null ||
+            attrs['gen_ai.usage.output_tokens'] != null ||
+            attrs['input_tokens'] != null ||
+            attrs['output_tokens'] != null;
+          if (!isChat && !isInference && !isAgentTurn && !hasUsageMetrics) return;
 
           const sessionId = String(
-            attrs['session.id'] || attrs['copilot.session_id'] || attrs['gen_ai.conversation.id'] || 'copilot',
+            attrs['session.id'] ||
+              attrs['copilot.session_id'] ||
+              attrs['gen_ai.conversation.id'] ||
+              'copilot',
           );
-          const model = String(attrs['gen_ai.request.model'] || attrs['model'] || attrs['ai.model'] || '');
+          const model = String(
+            attrs['gen_ai.request.model'] || attrs['model'] || attrs['ai.model'] || '',
+          );
           const inputTokens = num(attrs['gen_ai.usage.input_tokens'] ?? attrs['input_tokens']);
           const outputTokens = num(attrs['gen_ai.usage.output_tokens'] ?? attrs['output_tokens']);
-          const cacheRead = num(attrs['gen_ai.usage.cache_read_tokens'] ?? attrs['cache_read_tokens']);
-          const cacheWrite = num(attrs['gen_ai.usage.cache_write_tokens'] ?? attrs['cache_write_tokens']);
-          const reasoning = num(attrs['gen_ai.usage.reasoning_tokens'] ?? attrs['reasoning_tokens']);
+          const cacheRead = num(
+            attrs['gen_ai.usage.cache_read_tokens'] ?? attrs['cache_read_tokens'],
+          );
+          const cacheWrite = num(
+            attrs['gen_ai.usage.cache_write_tokens'] ?? attrs['cache_write_tokens'],
+          );
+          const reasoning = num(
+            attrs['gen_ai.usage.reasoning_tokens'] ?? attrs['reasoning_tokens'],
+          );
           const content = String(attrs['gen_ai.prompt'] || attrs['prompt'] || '');
           const role: NormalizedMessage['role'] = isChat ? 'user' : 'assistant';
           const privacy = applyPrivacyContent(role, content, options);

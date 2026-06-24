@@ -17,3 +17,4 @@ apps/cli/web
 .idea
 IMPLEMENTATION_PLAN.md
 scanner.md
+docs/sample_*.json

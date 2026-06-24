@@ -1,7 +1,14 @@
 import { eq, and, gte, lte, desc, sql, asc } from 'drizzle-orm';
 import type { AppDatabase } from './connection.js';
 import * as schema from './schema.js';
-import type { Provider, NormalizedSession, StatsSummary, PricingSource, ProviderSupportLevel, UsageConfidence } from '@agent-usage/shared';
+import type {
+  Provider,
+  NormalizedSession,
+  StatsSummary,
+  PricingSource,
+  ProviderSupportLevel,
+  UsageConfidence,
+} from '@agent-usage/shared';
 import { normalizeTokenTotals } from '@agent-usage/shared';
 
 function sessionRowValues(session: NormalizedSession, fileHash: string) {
@@ -23,9 +30,7 @@ function sessionRowValues(session: NormalizedSession, fileHash: string) {
     updatedAt: session.updatedAt || new Date().toISOString(),
     messageCount,
     promptCount,
-    sessionWarnings: session.warnings?.length
-      ? JSON.stringify(session.warnings)
-      : undefined,
+    sessionWarnings: session.warnings?.length ? JSON.stringify(session.warnings) : undefined,
     rawRetention: session.rawRetention,
     inputTokens: totals.inputTokens,
     outputTokens: totals.outputTokens,
@@ -57,10 +62,7 @@ export function upsertSession(db: AppDatabase['db'], session: NormalizedSession,
     .get();
 
   if (existing) {
-    db.update(schema.sessions)
-      .set(row)
-      .where(eq(schema.sessions.id, existing.id))
-      .run();
+    db.update(schema.sessions).set(row).where(eq(schema.sessions.id, existing.id)).run();
     return existing.id;
   }
 
@@ -237,11 +239,7 @@ export function getParserWarnings(
 }
 
 export function getSession(db: AppDatabase['db'], sessionId: string) {
-  return db
-    .select()
-    .from(schema.sessions)
-    .where(eq(schema.sessions.id, sessionId))
-    .get();
+  return db.select().from(schema.sessions).where(eq(schema.sessions.id, sessionId)).get();
 }
 
 export function getSessions(
@@ -705,11 +703,7 @@ export function getLastScanByProvider(db: AppDatabase['db']) {
 }
 
 export function getScanRun(db: AppDatabase['db'], runId: number) {
-  return db
-    .select()
-    .from(schema.scanRuns)
-    .where(eq(schema.scanRuns.id, runId))
-    .get();
+  return db.select().from(schema.scanRuns).where(eq(schema.scanRuns.id, runId)).get();
 }
 
 export function updateScanRunProgress(
@@ -906,6 +900,63 @@ export function getGroupedUsage(
     .sort((a, b) => b.value - a.value);
 }
 
+export type ModelCostBreakdownRow = {
+  label: string;
+  value: number;
+  tokens: number;
+  sessions: number;
+};
+
+/**
+ * Per-model breakdown for the "Cost by model" dashboard card: aggregated cost,
+ * token total, and session count, ranked by cost and limited to `limit` rows.
+ *
+ * Session count is `count(*)` over the `sessions` table (one row per session),
+ * NOT a sum over the daily rollup — summing daily rows would overcount sessions
+ * that span multiple days. Tokens come from the sessions table too so the
+ * cost/token/session figures are mutually consistent.
+ */
+export function getModelCostBreakdown(
+  db: AppDatabase['db'],
+  options: {
+    from?: string;
+    to?: string;
+    provider?: Provider;
+    usageConfidence?: UsageConfidence;
+    limit?: number;
+  } = {},
+): ModelCostBreakdownRow[] {
+  const conditions = [];
+  if (options.provider) conditions.push(eq(schema.sessions.provider, options.provider));
+  if (options.from) conditions.push(gte(schema.sessions.updatedAt, options.from));
+  if (options.to) conditions.push(lte(schema.sessions.updatedAt, options.to));
+  if (options.usageConfidence) {
+    conditions.push(eq(schema.sessions.usageConfidence, options.usageConfidence));
+  }
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const rows = db
+    .select({
+      label: schema.sessions.model,
+      value: sql<number>`coalesce(sum(${schema.sessions.estimatedCost}), 0)`,
+      tokens: sql<number>`coalesce(sum(${schema.sessions.totalTokens}), 0)`,
+      sessions: sql<number>`count(*)`,
+    })
+    .from(schema.sessions)
+    .where(where)
+    .groupBy(schema.sessions.model)
+    .orderBy(desc(sql<number>`coalesce(sum(${schema.sessions.estimatedCost}), 0)`))
+    .limit(options.limit ?? 10)
+    .all();
+
+  return rows.map((r) => ({
+    label: r.label || 'unknown',
+    value: r.value ?? 0,
+    tokens: r.tokens ?? 0,
+    sessions: r.sessions ?? 0,
+  }));
+}
+
 export function getPricingProfiles(db: AppDatabase['db']) {
   return db
     .selectDistinct({ profile: schema.pricingModels.profile })
@@ -1039,11 +1090,7 @@ export function upsertPricingModel(
 }
 
 export function getSetting(db: AppDatabase['db'], key: string) {
-  const row = db
-    .select()
-    .from(schema.settings)
-    .where(eq(schema.settings.key, key))
-    .get();
+  const row = db.select().from(schema.settings).where(eq(schema.settings.key, key)).get();
   return row?.value;
 }
 
@@ -1092,9 +1139,7 @@ export function setSetting(db: AppDatabase['db'], key: string, value: string) {
       .where(eq(schema.settings.key, key))
       .run();
   } else {
-    db.insert(schema.settings)
-      .values({ key, value, updatedAt: now })
-      .run();
+    db.insert(schema.settings).values({ key, value, updatedAt: now }).run();
   }
 }
 

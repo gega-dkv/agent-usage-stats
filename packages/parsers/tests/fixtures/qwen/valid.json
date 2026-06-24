@@ -1,0 +1,31 @@
+{
+  "chatId": "qwen-session-json",
+  "messages": [
+    {
+      "role": "user",
+      "parts": [{ "text": "Refactor the auth module" }],
+      "model": "qwen-max",
+      "usageMetadata": {
+        "promptTokenCount": 1200,
+        "candidatesTokenCount": 0,
+        "thoughtsTokenCount": 0,
+        "cachedContentTokenCount": 0,
+        "totalTokenCount": 1200
+      },
+      "timestamp": "2026-06-18T10:00:00Z"
+    },
+    {
+      "role": "model",
+      "parts": [{ "text": "I'll start by reviewing the current auth flow." }],
+      "model": "qwen-max",
+      "usageMetadata": {
+        "promptTokenCount": 2000,
+        "candidatesTokenCount": 320,
+        "thoughtsTokenCount": 80,
+        "cachedContentTokenCount": 1200,
+        "totalTokenCount": 1200
+      },
+      "timestamp": "2026-06-18T10:01:00Z"
+    }
+  ]
+}

@@ -1,5 +1,11 @@
+import fs from 'fs';
 import path from 'path';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
 import {
   applyPrivacyContent,
   buildSession,
@@ -32,12 +38,33 @@ export const qwenParser: ProviderParser = {
 
   canParse(filePath: string, sample: string): boolean {
     if (!filePath.includes('.qwen') && !filePath.includes('qwen')) return false;
-    if (!filePath.endsWith('.jsonl')) return false;
+    const isJsonl = filePath.endsWith('.jsonl');
+    const isJson = filePath.endsWith('.json');
+    if (!isJsonl && !isJson) return false;
     try {
-      const line = sample.split('\n').find((l) => l.trim());
-      if (!line) return false;
-      const r = JSON.parse(line) as QwenRecord;
-      return r.usageMetadata !== undefined || r.role !== undefined;
+      // JSONL: inspect the first non-blank line as a record.
+      if (isJsonl) {
+        const line = sample.split('\n').find((l) => l.trim());
+        if (!line) return false;
+        const r = JSON.parse(line) as QwenRecord;
+        return r.usageMetadata !== undefined || r.role !== undefined;
+      }
+      // Whole-file JSON (Gemini-style session file): array of records, or an
+      // object with usageMetadata / messages / parts.
+      const data = JSON.parse(sample);
+      if (Array.isArray(data)) {
+        return data.some(
+          (m) =>
+            (m as QwenRecord)?.usageMetadata !== undefined || (m as QwenRecord)?.role !== undefined,
+        );
+      }
+      if (data && typeof data === 'object') {
+        return (
+          (data as { usageMetadata?: unknown }).usageMetadata !== undefined ||
+          Array.isArray((data as { messages?: unknown[] }).messages)
+        );
+      }
+      return false;
     } catch {
       return false;
     }
@@ -47,39 +74,27 @@ export const qwenParser: ProviderParser = {
     const warnings: ParseResult['warnings'] = [];
     const messages: NormalizedMessage[] = [];
     const sessionId = normalizeSessionIdFromPath(filePath);
+    const isWholeFileJson = filePath.endsWith('.json');
+
+    const pushRecord = (record: QwenRecord) => {
+      const msg = qwenRecordToMessage(record, sessionId, options);
+      if (msg) messages.push(msg);
+    };
 
     try {
-      await streamJsonl<QwenRecord>(
-        filePath,
-        (record) => {
-          const role = mapRole(record.role);
-          const contentText = record.text || record.content || extractText(record.parts);
-          const usage = record.usageMetadata || {};
-          const inputTokens = usage.promptTokenCount;
-          const outputTokens = usage.candidatesTokenCount;
-          const reasoningTokens = usage.thoughtsTokenCount;
-          const cacheReadTokens = usage.cachedContentTokenCount;
-          const privacy = applyPrivacyContent(role, contentText, options);
-
-          messages.push({
-            id: newMessageId(),
-            sessionId,
-            timestamp: record.timestamp,
-            role,
-            model: record.model,
-            ...privacy,
-            inputTokens,
-            outputTokens,
-            reasoningTokens,
-            cacheReadTokens,
-            cacheCreationTokens: 0,
-            cachedInputTokens: cacheReadTokens,
-            usageConfidence: inputTokens || outputTokens ? 'exact' : 'unavailable',
-            raw: shouldStoreRaw(options) ? record : undefined,
-          });
-        },
-        (lineNum, error) => warnings.push(jsonParseWarning(filePath, error, lineNum)),
-      );
+      if (isWholeFileJson) {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        const records: QwenRecord[] = Array.isArray(data)
+          ? data
+          : Array.isArray((data as { messages?: QwenRecord[] }).messages)
+            ? (data as { messages: QwenRecord[] }).messages
+            : [data];
+        for (const record of records) pushRecord(record);
+      } else {
+        await streamJsonl<QwenRecord>(filePath, pushRecord, (lineNum, error) =>
+          warnings.push(jsonParseWarning(filePath, error, lineNum)),
+        );
+      }
     } catch (error) {
       warnings.push(fileReadWarning(filePath, error));
       return { sessions: [], warnings };
@@ -99,7 +114,7 @@ export const qwenParser: ProviderParser = {
       sessions: [
         buildSession(sessionId, 'qwen', messages, {
           sourcePath: filePath,
-          storageKind: 'jsonl',
+          storageKind: isWholeFileJson ? 'json' : 'jsonl',
           supportLevel: 'exact-usage',
           usageConfidence: 'exact',
           projectPath: path.dirname(filePath),
@@ -112,6 +127,50 @@ export const qwenParser: ProviderParser = {
     };
   },
 };
+
+/**
+ * Convert one Qwen (Gemini-fork) record into a normalized message.
+ * Qwen's promptTokenCount (input) INCLUDES cached content (§2/§5 of
+ * ai-cli-token-parsers.md), so the cached portion is split off into
+ * cacheReadTokens and subtracted from input to avoid double-counting.
+ */
+function qwenRecordToMessage(
+  record: QwenRecord,
+  sessionId: string,
+  options?: ParseOptions,
+): NormalizedMessage | null {
+  const role = mapRole(record.role);
+  const contentText = record.text || record.content || extractText(record.parts);
+  const usage = record.usageMetadata || {};
+  const cacheReadTokens = usage.cachedContentTokenCount;
+  const rawInput = usage.promptTokenCount;
+  const inputTokens =
+    rawInput != null
+      ? cacheReadTokens != null
+        ? Math.max(0, rawInput - cacheReadTokens)
+        : rawInput
+      : undefined;
+  const outputTokens = usage.candidatesTokenCount;
+  const reasoningTokens = usage.thoughtsTokenCount;
+  const privacy = applyPrivacyContent(role, contentText, options);
+
+  return {
+    id: newMessageId(),
+    sessionId,
+    timestamp: record.timestamp,
+    role,
+    model: record.model,
+    ...privacy,
+    inputTokens,
+    outputTokens,
+    reasoningTokens,
+    cacheReadTokens,
+    cacheCreationTokens: 0,
+    cachedInputTokens: cacheReadTokens,
+    usageConfidence: inputTokens || outputTokens ? 'exact' : 'unavailable',
+    raw: shouldStoreRaw(options) ? record : undefined,
+  };
+}
 
 function mapRole(role?: string): NormalizedMessage['role'] {
   switch ((role || '').toLowerCase()) {
@@ -129,5 +188,8 @@ function mapRole(role?: string): NormalizedMessage['role'] {
 
 function extractText(parts?: Array<{ text?: string }>): string {
   if (!parts) return '';
-  return parts.filter((p) => p.text).map((p) => p.text!).join('\n');
+  return parts
+    .filter((p) => p.text)
+    .map((p) => p.text!)
+    .join('\n');
 }

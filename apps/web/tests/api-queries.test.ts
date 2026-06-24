@@ -6,6 +6,7 @@ import { initializeDatabase, refreshUsageRollups } from '@agent-usage/db';
 import {
   listUserPrompts,
   getGroupedUsage,
+  getModelCostBreakdown,
   clonePricingProfile,
   getPricingProfiles,
   getLastScanByProvider,
@@ -71,16 +72,7 @@ describe('web query helpers', () => {
           id, session_id, timestamp, role, content_preview, input_tokens, output_tokens, simulated_cost
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(
-        'm1',
-        's1',
-        '2026-06-10T10:00:00Z',
-        'user',
-        'hello world',
-        100,
-        0,
-        0.5,
-      );
+      .run('m1', 's1', '2026-06-10T10:00:00Z', 'user', 'hello world', 100, 0, 0.5);
 
     sqlite
       .prepare(
@@ -189,6 +181,31 @@ describe('web API response contracts (query layer)', () => {
       sessionsByUsageConfidence: summary.sessionsByUsageConfidence,
     };
     expect(typeof quality.costEstimatedSessions).toBe('number');
+  });
+
+  it('cost-by-model breakdown carries non-zero tokens and sessions per model', () => {
+    // Regression: the "Cost by model" card used to show "0 tokens 0 sessions"
+    // because the API returned only {label, value} (cost). The breakdown must
+    // now include tokens + a count(*) session count that does not overcount.
+    const breakdown = getModelCostBreakdown(db);
+
+    expect(breakdown.length).toBeGreaterThan(0);
+    const row = breakdown.find((r) => r.label.includes('claude-sonnet')) ?? breakdown[0];
+    expect(row.tokens).toBeGreaterThan(0);
+    expect(row.sessions).toBeGreaterThan(0);
+    // shape contract: each row carries all four fields.
+    expect(row).toMatchObject({
+      label: expect.any(String),
+      value: expect.any(Number),
+      tokens: expect.any(Number),
+      sessions: expect.any(Number),
+    });
+
+    // Summing per-model session counts must equal the total distinct session
+    // count (a sum over the daily rollup would overcount multi-day sessions).
+    const sumModelSessions = breakdown.reduce((sum, r) => sum + r.sessions, 0);
+    const summary = getStatsSummary(db);
+    expect(sumModelSessions).toBe(summary.totalSessions);
   });
 
   it('sessions API shape: list and detail messages', () => {

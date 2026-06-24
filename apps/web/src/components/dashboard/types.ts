@@ -1,9 +1,4 @@
-import type {
-  GroupBy,
-  Granularity,
-  Metric,
-  TimeRange,
-} from '@/lib/stats-params';
+import type { GroupBy, Granularity, Metric, TimeRange } from '@/lib/stats-params';
 
 /** Shape of a row returned by /api/stats `timeSeries` (union across granularities). */
 export type TimeSeriesRow = Record<string, unknown>;
@@ -44,7 +39,7 @@ export type StatsResponse = {
   previousSummary?: StatsSummary;
   timeSeries: TimeSeriesRow[];
   grouped: { label: string; value: number }[];
-  costByModel: { label: string; value: number }[];
+  costByModel: { label: string; value: number; tokens: number; sessions: number }[];
   providerComparison: { label: string; value: number }[];
   recentSessions: SessionRow[];
   expensiveSessions: SessionRow[];

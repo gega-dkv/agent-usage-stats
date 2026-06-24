@@ -98,7 +98,8 @@ export const PROVIDER_REGISTRY: Record<Provider, ProviderDefinition> = {
     detectDirs: ['$CODEX_HOME', '~/.codex'],
     hasParser: true,
     enabledByDefault: true,
-    notes: 'Exact token usage from token_count events; falls back to text estimation for legacy schemas.',
+    notes:
+      'Exact token usage from token_count events; falls back to text estimation for legacy schemas.',
   },
   gemini: {
     id: 'gemini',
@@ -133,9 +134,15 @@ export const PROVIDER_REGISTRY: Record<Provider, ProviderDefinition> = {
     pricingProvider: 'qwen',
     supportLevel: 'exact-usage',
     defaultConfidence: 'exact',
-    storageKinds: ['jsonl'],
+    // Qwen is a Gemini fork; some builds write whole-file JSON
+    // (`chats/session-*.json`, per doc §3/§5) and others JSONL. Cover both.
+    storageKinds: ['jsonl', 'json'],
     envVars: ['QWEN_DATA_DIR'],
-    defaultPaths: ['~/.qwen/projects/**/chats/*.jsonl'],
+    defaultPaths: [
+      '~/.qwen/projects/**/chats/*.jsonl',
+      '~/.qwen/tmp/**/chats/*.json',
+      '~/.qwen/projects/**/chats/*.json',
+    ],
     detectDirs: ['~/.qwen'],
     hasParser: true,
     enabledByDefault: true,
@@ -213,11 +220,15 @@ export const PROVIDER_REGISTRY: Record<Provider, ProviderDefinition> = {
     defaultConfidence: 'exact',
     storageKinds: ['otel'],
     envVars: ['COPILOT_OTEL_FILE_EXPORTER_PATH'],
-    defaultPaths: ['~/.copilot/otel/*.jsonl'],
+    // Doc §4.146: primary source is per-session events.jsonl under
+    // session-state/; the OTel export under otel/ is an opt-in fallback
+    // (requires COPILOT_OTEL_ENABLED=true + file exporter). Cover both.
+    defaultPaths: ['~/.copilot/session-state/**/events.jsonl', '~/.copilot/otel/*.jsonl'],
     detectDirs: ['~/.copilot'],
     hasParser: true,
     enabledByDefault: true,
-    notes: 'Requires COPILOT_OTEL_ENABLED=true and a file exporter.',
+    notes:
+      'Primary: session-state events.jsonl. Fallback: OTel file export (requires COPILOT_OTEL_ENABLED=true).',
   },
   openclaw: {
     id: 'openclaw',
@@ -227,8 +238,16 @@ export const PROVIDER_REGISTRY: Record<Provider, ProviderDefinition> = {
     defaultConfidence: 'provider-recorded-cost',
     storageKinds: ['jsonl'],
     envVars: ['OPENCLAW_DIR'],
-    defaultPaths: ['~/.openclaw/agents/**/sessions/*.jsonl'],
-    detectDirs: ['~/.openclaw', '~/.clawdbot'],
+    // Doc §4.127: flat `~/.openclaw/agents/*.jsonl`, plus legacy `.clawdbot`,
+    // `.moltbot`, `.moldbot` trees. Cover both the flat layout and a nested
+    // `agents/**/sessions/` layout so neither is missed by discovery.
+    defaultPaths: [
+      '~/.openclaw/agents/**/*.jsonl',
+      '~/.clawdbot/agents/**/*.jsonl',
+      '~/.moltbot/agents/**/*.jsonl',
+      '~/.moldbot/agents/**/*.jsonl',
+    ],
+    detectDirs: ['~/.openclaw', '~/.clawdbot', '~/.moltbot', '~/.moldbot'],
     hasParser: true,
     enabledByDefault: true,
   },
@@ -317,13 +336,16 @@ export const PROVIDER_REGISTRY: Record<Provider, ProviderDefinition> = {
     pricingProvider: 'other',
     supportLevel: 'detected-only',
     defaultConfidence: 'unavailable',
-    storageKinds: ['json'],
+    storageKinds: ['sqlite', 'json'],
     envVars: [],
-    defaultPaths: ['~/.config/crush/crush.json'],
+    // Doc §7.210: per-project .crush/ dir holding a SQLite DB (resolve via
+    // `crush dirs data`); also surface the legacy ~/.config/crush/crush.json
+    // for detection. Detection only — no stable public token/session schema.
+    defaultPaths: ['~/**/.crush/**', '~/.config/crush/crush.json'],
     detectDirs: ['~/.config/crush'],
     hasParser: true,
     enabledByDefault: false,
-    notes: 'Detection only — no stable public token/session schema.',
+    notes: 'Detection only — no stable public token/session schema (per-project .crush/ SQLite).',
   },
   grok: {
     id: 'grok',

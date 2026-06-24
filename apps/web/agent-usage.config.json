@@ -1,0 +1,90 @@
+{
+  "privacyMode": "raw",
+  "providers": {
+    "claude": {
+      "enabled": true,
+      "paths": []
+    },
+    "codex": {
+      "enabled": true,
+      "paths": []
+    },
+    "gemini": {
+      "enabled": true,
+      "paths": []
+    },
+    "opencode": {
+      "enabled": true,
+      "paths": []
+    },
+    "qwen": {
+      "enabled": true,
+      "paths": []
+    },
+    "goose": {
+      "enabled": true,
+      "paths": []
+    },
+    "droid": {
+      "enabled": true,
+      "paths": []
+    },
+    "amp": {
+      "enabled": true,
+      "paths": []
+    },
+    "codebuff": {
+      "enabled": true,
+      "paths": []
+    },
+    "kimi": {
+      "enabled": true,
+      "paths": []
+    },
+    "copilot": {
+      "enabled": true,
+      "paths": []
+    },
+    "openclaw": {
+      "enabled": true,
+      "paths": []
+    },
+    "hermes": {
+      "enabled": true,
+      "paths": []
+    },
+    "pi-agent": {
+      "enabled": true,
+      "paths": []
+    },
+    "kilo": {
+      "enabled": true,
+      "paths": []
+    },
+    "aider": {
+      "enabled": false,
+      "paths": []
+    },
+    "cursor": {
+      "enabled": false,
+      "paths": []
+    },
+    "specstory": {
+      "enabled": false,
+      "paths": []
+    },
+    "crush": {
+      "enabled": false,
+      "paths": []
+    },
+    "grok": {
+      "enabled": false,
+      "paths": []
+    }
+  },
+  "customPaths": [],
+  "currency": "USD",
+  "storeRawRecords": false,
+  "resimulateRecordedCosts": false,
+  "estimatePromptOnlySources": false
+}
