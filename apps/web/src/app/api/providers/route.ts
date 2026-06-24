@@ -1,7 +1,24 @@
+import os from 'node:os';
 import { NextResponse } from 'next/server';
 import { getCore, getDb } from '@/lib/db-server';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * Replace the user's home directory prefix with `~` for display.
+ * Works across macOS, Linux, and Windows: `os.homedir()` returns the
+ * platform-native home (`/Users/x`, `/home/x`, `C:\Users\x`), and we match
+ * either path separator so a Windows `C:\Users\x\.codex` shortens too.
+ */
+function abbreviateHome(p: string, home: string): string {
+  if (!p || !home) return p;
+  const root = home.replace(/[\\/]+$/, '');
+  if (p === root) return '~';
+  if (p.startsWith(`${root}/`) || p.startsWith(`${root}\\`)) {
+    return `~${p.slice(root.length)}`;
+  }
+  return p;
+}
 
 export async function GET() {
   try {
@@ -17,6 +34,7 @@ export async function GET() {
     const database = await getDb();
     const config = loadConfig();
 
+    const home = os.homedir();
     const agents = detectAgentInstallations(config);
     const stats = getProviderUsageStats(database.db);
     const statsByProvider = new Map(stats.map((s) => [s.provider, s]));
@@ -34,6 +52,8 @@ export async function GET() {
 
       return {
         ...agent,
+        path: abbreviateHome(agent.path, home),
+        sessionPatterns: agent.sessionPatterns.map((p) => abbreviateHome(p, home)),
         usage,
         lastScan: lastScan
           ? {

@@ -15,3 +15,4 @@ apps/desktop/src-tauri/target/
 apps/web/.next
 apps/cli/web
 .idea
+IMPLEMENTATION_PLAN.md
