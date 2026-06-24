@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, type MouseEvent } from 'react';
 import { DEFAULT_LINE_COLOR, shortNumber } from './chart-utils.js';
 import { useResizeObserver } from './use-resize-observer.js';
 
@@ -75,7 +75,7 @@ export function UsageLineChart({
   const xStep = Math.max(1, Math.ceil(data.length / 7));
   const hoverPoint = hover != null ? points[hover] : null;
 
-  const handleMove = (e: React.MouseEvent<SVGSVGElement>) => {
+  const handleMove = (e: MouseEvent<SVGSVGElement>) => {
     if (!svgRef.current || points.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
     const scaleX = w / rect.width;

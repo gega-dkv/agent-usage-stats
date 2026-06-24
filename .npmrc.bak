@@ -1,0 +1,7 @@
+# Run install lifecycle scripts on Windows without requiring Git Bash `sh`.
+shell-emulator=true
+
+# WSL users on /mnt/* drives: add these locally (do not commit machine-specific paths):
+# node-linker=hoisted
+# package-import-method=copy
+# store-dir=/home/<you>/.local/share/pnpm/store

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import * as dbPkg from '@agent-usage/db';
+import * as providerSqlite from '../src/provider-sqlite.js';
 import { qwenParser } from '../src/qwen.js';
 import { openclawParser } from '../src/openclaw.js';
 import { kimiParser } from '../src/kimi.js';
@@ -134,7 +134,7 @@ describe('Phase 2 provider parsers', () => {
   });
 
   it('sqlite-backed parsers open provider databases read-only', async () => {
-    const spy = vi.spyOn(dbPkg, 'openProviderDatabase');
+    const spy = vi.spyOn(providerSqlite, 'openProviderDatabase');
     try {
       for (const [parser, provider] of [
         [gooseParser, 'goose'],

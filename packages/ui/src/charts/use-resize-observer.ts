@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 
 /**
  * Observe an element's width. Returns a ref to attach and the current pixel width.
  * Used by charts to render responsively instead of relying on a fixed viewBox.
  */
 export function useResizeObserver<T extends HTMLElement>(): {
-  ref: React.RefObject<T | null>;
+  ref: RefObject<T | null>;
   width: number;
   height: number;
 } {

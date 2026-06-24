@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { ScanButton } from '@/components/scan-button';
 import { useQuery } from '@/lib/use-query';
 import { fetchJson } from '@/lib/fetcher';
@@ -100,7 +100,7 @@ export default function ProvidersPage() {
   );
 }
 
-function ProviderGroup({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
+function ProviderGroup({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2">

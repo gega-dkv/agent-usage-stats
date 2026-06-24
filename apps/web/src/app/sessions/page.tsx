@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useMemo } from 'react';
+import { Suspense, useMemo, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Search, ArrowUp, ArrowDown, MessageSquare } from 'lucide-react';
 import { listProviderIds, getProviderDefinition } from '@agent-usage/shared';
@@ -265,7 +265,7 @@ function SessionsContent() {
   );
 }
 
-function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+function FilterField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</Label>

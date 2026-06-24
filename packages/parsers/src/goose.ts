@@ -1,4 +1,4 @@
-import { openProviderDatabase } from '@agent-usage/db';
+import { openProviderDatabase } from './provider-sqlite.js';
 import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
 import { buildSession, newMessageId } from './parser-helpers.js';
 import {

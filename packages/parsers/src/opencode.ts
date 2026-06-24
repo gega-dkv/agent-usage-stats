@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { openProviderDatabase } from '@agent-usage/db';
+import { openProviderDatabase } from './provider-sqlite.js';
 import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
 import {
   applyPrivacyContent,

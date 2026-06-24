@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useMemo } from 'react';
+import { Suspense, useMemo, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Search, ChevronLeft, ChevronRight, ShieldAlert, Tags } from 'lucide-react';
 import { listProviderIds, getProviderDefinition } from '@agent-usage/shared';
@@ -315,7 +315,7 @@ function FilterField({
   className,
 }: {
   label: string;
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
 }) {
   return (

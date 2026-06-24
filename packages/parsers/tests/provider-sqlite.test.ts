@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { initializeDatabase } from '../src/connection.js';
+import Database from 'better-sqlite3';
 import {
   isSqliteLockedError,
   openProviderDatabase,
@@ -13,8 +13,8 @@ describe('openProviderDatabase', () => {
 
   beforeEach(() => {
     dbPath = path.join(os.tmpdir(), `aus-provider-${Date.now()}.db`);
-    const db = initializeDatabase(dbPath);
-    db.sqlite.close();
+    const db = new Database(dbPath);
+    db.close();
   });
 
   afterEach(() => {

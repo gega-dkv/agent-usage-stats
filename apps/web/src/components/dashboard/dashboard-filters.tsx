@@ -1,7 +1,7 @@
 'use client';
 
 import { listProviderIds, getProviderDefinition } from '@agent-usage/shared';
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -163,7 +163,7 @@ export function DashboardFiltersBar({
   );
 }
 
-function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+function FilterField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</Label>
@@ -182,7 +182,7 @@ function FilterSelect({
   label: string;
   value: string;
   onChange: (v: string) => void;
-  children: React.ReactNode;
+  children: ReactNode;
   width?: string;
 }) {
   return (
