@@ -336,6 +336,7 @@ function normalizeAnyMessage(
   let outputTokens: number | undefined;
   let cacheReadTokens: number | undefined;
   let reasoningTokens: number | undefined;
+  let toolTokens: number | undefined;
   let cachedInputTokens: number | undefined;
 
   if (msg.tokens) {
@@ -346,6 +347,7 @@ function normalizeAnyMessage(
       rawInput != null ? (cached != null ? Math.max(0, rawInput - cached) : rawInput) : undefined;
     outputTokens = msg.tokens.output;
     reasoningTokens = msg.tokens.thoughts;
+    toolTokens = msg.tokens.tool;
     cacheReadTokens = cached;
     cachedInputTokens = cached;
   } else if (msg.usageMetadata) {
@@ -377,6 +379,7 @@ function normalizeAnyMessage(
     cacheReadTokens,
     cachedInputTokens,
     reasoningTokens,
+    toolTokens,
     usageConfidence: inputTokens || outputTokens ? 'exact' : undefined,
     raw: shouldStoreRaw(options) ? msg : undefined,
   };

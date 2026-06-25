@@ -6,7 +6,12 @@ import type {
   ParseOptions,
   NormalizedMessage,
 } from '@agent-usage/shared';
-import { buildSession, fileReadWarning, normalizeSessionIdFromPath, newMessageId } from './parser-helpers.js';
+import {
+  buildSession,
+  fileReadWarning,
+  normalizeSessionIdFromPath,
+  newMessageId,
+} from './parser-helpers.js';
 
 /**
  * Grok keeps a per-session "signals.json" under the ~/.grok/sessions tree. Each

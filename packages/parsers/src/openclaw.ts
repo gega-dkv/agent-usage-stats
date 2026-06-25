@@ -1,5 +1,10 @@
 import path from 'path';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
 import {
   applyPrivacyContent,
   buildSession,
@@ -59,7 +64,11 @@ export const openclawParser: ProviderParser = {
       await streamJsonl<OpenClawRecord>(
         filePath,
         (record) => {
-          if (record.type === 'model_change' || record.type === 'model-snapshot' || record.type === 'custom') {
+          if (
+            record.type === 'model_change' ||
+            record.type === 'model-snapshot' ||
+            record.type === 'custom'
+          ) {
             if (record.model) currentModel = record.model;
             return;
           }
@@ -120,9 +129,7 @@ export const openclawParser: ProviderParser = {
           usageConfidence: recordedCost > 0 ? 'provider-recorded-cost' : 'exact',
           projectPath: path.dirname(filePath),
           projectName: path.basename(path.dirname(path.dirname(filePath))),
-          costs: recordedCost
-            ? { recordedCost, currency: 'USD', estimated: false }
-            : undefined,
+          costs: recordedCost ? { recordedCost, currency: 'USD', estimated: false } : undefined,
         }),
       ],
       warnings,
@@ -146,7 +153,10 @@ function mapRole(role?: string): NormalizedMessage['role'] {
 function extractContent(content?: string | Array<{ text?: string }>): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content.filter((b) => b.text).map((b) => b.text!).join('\n');
+    return content
+      .filter((b) => b.text)
+      .map((b) => b.text!)
+      .join('\n');
   }
   return '';
 }

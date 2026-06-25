@@ -36,6 +36,7 @@ export const kiloParser: ProviderParser = {
       const outputCol = pickColumn(cols, ['output_tokens', 'completion_tokens']);
       const cacheReadCol = pickColumn(cols, ['cache_read_tokens', 'cached_tokens']);
       const cacheWriteCol = pickColumn(cols, ['cache_creation_tokens', 'cache_write_tokens']);
+      const reasoningCol = pickColumn(cols, ['reasoning_tokens', 'thoughts_tokens']);
       const costCol = pickColumn(cols, ['cost', 'recorded_cost', 'total_cost']);
       const modelCol = pickColumn(cols, ['model']);
       const roleCol = pickColumn(cols, ['role']);
@@ -61,6 +62,7 @@ export const kiloParser: ProviderParser = {
           outputTokens: outputCol ? readNumber(row[outputCol]) : undefined,
           cacheReadTokens: cacheReadCol ? readNumber(row[cacheReadCol]) : undefined,
           cacheCreationTokens: cacheWriteCol ? readNumber(row[cacheWriteCol]) : undefined,
+          reasoningTokens: reasoningCol ? readNumber(row[reasoningCol]) : undefined,
           recordedCost,
           usageConfidence: recordedCost != null ? 'provider-recorded-cost' : 'exact',
         };
@@ -69,7 +71,8 @@ export const kiloParser: ProviderParser = {
       }
 
       const sessions = Array.from(bySession.entries()).map(([sessionId, messages]) => {
-        const recordedCost = messages.reduce((sum, m) => sum + (m.recordedCost || 0), 0) || undefined;
+        const recordedCost =
+          messages.reduce((sum, m) => sum + (m.recordedCost || 0), 0) || undefined;
         return buildSession(sessionId, 'kilo', messages, {
           sourcePath: filePath,
           storageKind: 'sqlite',

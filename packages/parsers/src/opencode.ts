@@ -1,7 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { openProviderDatabase } from '@agent-usage/db';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
 import {
   applyPrivacyContent,
   buildSession,
@@ -45,9 +50,7 @@ export const opencodeParser: ProviderParser = {
     if (filePath.endsWith('.json')) return parseLegacyJson(filePath, options);
     return {
       sessions: [],
-      warnings: [
-        unknownSchemaWarning(filePath, 'Unsupported OpenCode file format'),
-      ],
+      warnings: [unknownSchemaWarning(filePath, 'Unsupported OpenCode file format')],
     };
   },
 };
@@ -65,7 +68,12 @@ async function parseSqlite(filePath: string, options?: ParseOptions): Promise<Pa
     if (!sessionTable || !messageTable) {
       return {
         sessions: [],
-        warnings: [unknownSchemaWarning(filePath, `OpenCode schema missing session/message tables (found: ${tables.join(', ')})`)],
+        warnings: [
+          unknownSchemaWarning(
+            filePath,
+            `OpenCode schema missing session/message tables (found: ${tables.join(', ')})`,
+          ),
+        ],
       };
     }
 
@@ -76,10 +84,14 @@ async function parseSqlite(filePath: string, options?: ParseOptions): Promise<Pa
     const modelCol = pickColumn(msgCols, ['model']);
     const inputCol = pickColumn(msgCols, ['input_tokens', 'prompt_tokens']);
     const outputCol = pickColumn(msgCols, ['output_tokens', 'completion_tokens']);
-    const costCol = pickColumn(msgCols, ['cost']);
+    const cacheReadCol = pickColumn(msgCols, ['cache_read_tokens', 'cached_tokens']);
+    const cacheWriteCol = pickColumn(msgCols, ['cache_creation_tokens', 'cache_write_tokens']);
+    const reasoningCol = pickColumn(msgCols, ['reasoning_tokens', 'thoughts_tokens']);
     const idCol = pickColumn(msgCols, ['id'])!;
 
-    const rows = db.prepare(`SELECT * FROM ${messageTable}`).all() as Array<Record<string, unknown>>;
+    const rows = db.prepare(`SELECT * FROM ${messageTable}`).all() as Array<
+      Record<string, unknown>
+    >;
     const bySession = new Map<string, NormalizedMessage[]>();
 
     for (const row of rows) {
@@ -88,20 +100,64 @@ async function parseSqlite(filePath: string, options?: ParseOptions): Promise<Pa
       const role = mapRole(String(row[roleCol || ''] || payload?.role || 'unknown'));
       const contentText = extractContent(payload);
       const privacy = applyPrivacyContent(role, contentText, options);
+      // OpenCode stores usage either as flat columns or as a nested `tokens`/
+      // `usage` object in the JSON `data` payload (doc §6.173). Read both.
+      const tokens = (payload?.tokens as Record<string, number> | undefined) || {};
       const usage = (payload?.usage as Record<string, number> | undefined) || {};
-      const inputTokens = inputCol ? readNumber(row[inputCol]) : readNumber(usage.input_tokens ?? usage.prompt_tokens);
-      const outputTokens = outputCol ? readNumber(row[outputCol]) : readNumber(usage.output_tokens ?? usage.completion_tokens);
-      const recordedCost = costCol ? readNumber(row[costCol]) : readNumber(payload?.cost);
+      const inputTokens = inputCol
+        ? readNumber(row[inputCol])
+        : readNumber(
+            tokens.input ?? tokens.input_tokens ?? usage.input_tokens ?? usage.prompt_tokens,
+          );
+      const outputTokens = outputCol
+        ? readNumber(row[outputCol])
+        : readNumber(
+            tokens.output ?? tokens.output_tokens ?? usage.output_tokens ?? usage.completion_tokens,
+          );
+      const cacheReadTokens = cacheReadCol
+        ? readNumber(row[cacheReadCol])
+        : readNumber(
+            tokens.cache_read ??
+              tokens.cacheRead ??
+              usage.cache_read_tokens ??
+              usage.cacheReadTokens,
+          );
+      const cacheCreationTokens = cacheWriteCol
+        ? readNumber(row[cacheWriteCol])
+        : readNumber(
+            tokens.cache_write ??
+              tokens.cacheWrite ??
+              usage.cache_creation_tokens ??
+              usage.cacheCreationTokens,
+          );
+      const reasoningTokens = reasoningCol
+        ? readNumber(row[reasoningCol])
+        : readNumber(
+            tokens.reasoning ??
+              tokens.reasoning_tokens ??
+              usage.reasoning_tokens ??
+              usage.reasoningTokens,
+          );
 
       const message: NormalizedMessage = {
         id: String(row[idCol]),
         sessionId,
         role,
-        model: modelCol ? String(row[modelCol] || '') || undefined : String(payload?.model || '') || undefined,
+        model: modelCol
+          ? String(row[modelCol] || '') || undefined
+          : String(payload?.model || '') || undefined,
         ...privacy,
         inputTokens,
         outputTokens,
-        recordedCost: recordedCost === 0 ? undefined : recordedCost,
+        cacheReadTokens,
+        cacheCreationTokens,
+        cachedInputTokens:
+          cacheReadTokens != null || cacheCreationTokens != null
+            ? (cacheReadTokens ?? 0) + (cacheCreationTokens ?? 0)
+            : undefined,
+        reasoningTokens,
+        // Doc §6.175: stored cost is always 0 → ignore and recompute downstream.
+        recordedCost: undefined,
         usageConfidence: inputTokens || outputTokens ? 'exact' : 'unavailable',
         raw: shouldStoreRaw(options) ? row : undefined,
       };
@@ -113,8 +169,12 @@ async function parseSqlite(filePath: string, options?: ParseOptions): Promise<Pa
       buildSession(sessionId, 'opencode', messages, {
         sourcePath: filePath,
         storageKind: 'sqlite',
-        supportLevel: messages.some((m) => m.inputTokens || m.outputTokens) ? 'exact-usage' : 'partial-usage',
-        usageConfidence: messages.some((m) => m.inputTokens || m.outputTokens) ? 'exact' : 'unavailable',
+        supportLevel: messages.some((m) => m.inputTokens || m.outputTokens)
+          ? 'exact-usage'
+          : 'partial-usage',
+        usageConfidence: messages.some((m) => m.inputTokens || m.outputTokens)
+          ? 'exact'
+          : 'unavailable',
       }),
     );
 
@@ -130,23 +190,48 @@ async function parseLegacyJson(filePath: string, options?: ParseOptions): Promis
     const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
     const isMessage = filePath.includes('/message/');
     const sessionId = String(
-      data.sessionID || data.session_id || (isMessage ? path.basename(path.dirname(filePath)) : path.basename(filePath, '.json')),
+      data.sessionID ||
+        data.session_id ||
+        (isMessage ? path.basename(path.dirname(filePath)) : path.basename(filePath, '.json')),
     );
 
     if (isMessage || data.role) {
       const role = mapRole(String(data.role || 'unknown'));
       const contentText = extractContent(data);
       const privacy = applyPrivacyContent(role, contentText, options);
+      const tokens = (data.tokens as Record<string, number> | undefined) || {};
       const usage = (data.usage as Record<string, number> | undefined) || {};
+      const cacheReadTokens = readNumber(
+        tokens.cache_read ?? tokens.cacheRead ?? usage.cache_read_tokens,
+      );
+      const cacheCreationTokens = readNumber(
+        tokens.cache_write ?? tokens.cacheWrite ?? usage.cache_creation_tokens,
+      );
       const message: NormalizedMessage = {
         id: String(data.id || newMessageId()),
         sessionId,
         role,
         model: String(data.model || data.provider || '') || undefined,
         ...privacy,
-        inputTokens: readNumber(usage.input_tokens ?? usage.prompt_tokens),
-        outputTokens: readNumber(usage.output_tokens ?? usage.completion_tokens),
-        usageConfidence: usage.input_tokens || usage.output_tokens ? 'exact' : 'unavailable',
+        inputTokens: readNumber(
+          tokens.input ?? tokens.input_tokens ?? usage.input_tokens ?? usage.prompt_tokens,
+        ),
+        outputTokens: readNumber(
+          tokens.output ?? tokens.output_tokens ?? usage.output_tokens ?? usage.completion_tokens,
+        ),
+        cacheReadTokens,
+        cacheCreationTokens,
+        cachedInputTokens:
+          cacheReadTokens != null || cacheCreationTokens != null
+            ? (cacheReadTokens ?? 0) + (cacheCreationTokens ?? 0)
+            : undefined,
+        reasoningTokens: readNumber(
+          tokens.reasoning ?? tokens.reasoning_tokens ?? usage.reasoning_tokens,
+        ),
+        usageConfidence:
+          usage.input_tokens || usage.output_tokens || tokens.input || tokens.output
+            ? 'exact'
+            : 'unavailable',
         raw: shouldStoreRaw(options) ? data : undefined,
       };
       return {
@@ -154,7 +239,8 @@ async function parseLegacyJson(filePath: string, options?: ParseOptions): Promis
           buildSession(sessionId, 'opencode', [message], {
             sourcePath: filePath,
             storageKind: 'json',
-            supportLevel: message.inputTokens || message.outputTokens ? 'exact-usage' : 'partial-usage',
+            supportLevel:
+              message.inputTokens || message.outputTokens ? 'exact-usage' : 'partial-usage',
           }),
         ],
         warnings,
@@ -194,7 +280,11 @@ function extractContent(data: Record<string, unknown> | null): string | undefine
   if (typeof data.content === 'string') return data.content;
   if (Array.isArray(data.parts)) {
     return data.parts
-      .map((p) => (typeof p === 'object' && p && 'text' in p ? String((p as { text?: string }).text || '') : ''))
+      .map((p) =>
+        typeof p === 'object' && p && 'text' in p
+          ? String((p as { text?: string }).text || '')
+          : '',
+      )
       .filter(Boolean)
       .join('\n');
   }

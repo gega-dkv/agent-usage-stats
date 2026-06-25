@@ -1,6 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
 import {
   applyPrivacyContent,
   buildSession,
@@ -43,7 +48,9 @@ export const specstoryParser: ProviderParser = {
           const parts = block.split(/^#\s*Assistant\s*$/im);
           const userText = parts[0]?.trim();
           if (userText) {
-            messages.push(buildSpecstoryMessage(sessionId, 'User', userText, allowEstimate, options));
+            messages.push(
+              buildSpecstoryMessage(sessionId, 'User', userText, allowEstimate, options),
+            );
           }
           const assistantText = parts[1]?.trim();
           if (assistantText) {
@@ -55,7 +62,9 @@ export const specstoryParser: ProviderParser = {
       }
 
       if (messages.length === 0 && content.trim()) {
-        messages.push(buildSpecstoryMessage(sessionId, 'User', body.trim(), allowEstimate, options));
+        messages.push(
+          buildSpecstoryMessage(sessionId, 'User', body.trim(), allowEstimate, options),
+        );
       }
 
       if (messages.length === 0) {
@@ -131,7 +140,9 @@ function buildSpecstoryMessage(
   allowEstimate: boolean,
   options?: ParseOptions,
 ): NormalizedMessage {
-  const role: NormalizedMessage['role'] = roleLabel.toLowerCase().startsWith('user') ? 'user' : 'assistant';
+  const role: NormalizedMessage['role'] = roleLabel.toLowerCase().startsWith('user')
+    ? 'user'
+    : 'assistant';
   let inputTokens: number | undefined;
   let outputTokens: number | undefined;
   let usageConfidence: NormalizedMessage['usageConfidence'] = 'metadata-only';

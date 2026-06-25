@@ -1,0 +1,3 @@
+{"sessionId":"droid-jsonl-1","projectName":"webapp","provider":"anthropic"}
+{"usage":{"inputTokens":500,"outputTokens":0,"cacheReadTokens":30}}
+{"messages":[{"role":"user","content":"Ship the feature","usage":{"inputTokens":0,"outputTokens":0}},{"role":"assistant","content":"Done","usage":{"inputTokens":0,"outputTokens":180,"cacheCreationTokens":12,"thinkingTokens":20}}]}

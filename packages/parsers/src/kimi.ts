@@ -1,5 +1,10 @@
 import path from 'path';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
 import {
   applyPrivacyContent,
   buildSession,
@@ -56,7 +61,11 @@ export const kimiParser: ProviderParser = {
           const cacheReadTokens = usage.input_cache_read;
           const cacheCreationTokens = usage.input_cache_creation;
           const hasUsage =
-            (inputTokens || 0) + (outputTokens || 0) + (cacheReadTokens || 0) + (cacheCreationTokens || 0) > 0;
+            (inputTokens || 0) +
+              (outputTokens || 0) +
+              (cacheReadTokens || 0) +
+              (cacheCreationTokens || 0) >
+            0;
           if (!hasUsage) return;
 
           const role: NormalizedMessage['role'] = 'assistant';

@@ -1,16 +1,28 @@
 [
   {
+    "id": "cb-user-1",
     "role": "user",
     "content": "Add tests for billing",
+    "timestamp": "2026-06-18T10:00:00Z",
     "metadata": {
       "usage": { "inputTokens": 700, "outputTokens": 0, "cacheReadTokens": 50 }
     }
   },
   {
+    "id": "cb-assistant-1",
     "role": "assistant",
     "content": "Added billing tests.",
+    "timestamp": "2026-06-18T10:01:00Z",
     "metadata": {
       "codebuff": { "usage": { "outputTokens": 260, "cacheCreationTokens": 10, "credits": 1.2 } }
     }
+  },
+  {
+    "id": "cb-credits-only",
+    "role": "assistant",
+    "content": "Ran a tool with no token accounting.",
+    "timestamp": "2026-06-18T10:02:00Z",
+    "credits": 5,
+    "metadata": {}
   }
 ]

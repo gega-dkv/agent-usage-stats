@@ -1,6 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
 import {
   applyPrivacyContent,
   buildSession,
@@ -37,12 +42,16 @@ export const aiderParser: ProviderParser = {
       const blocks = content.split(/\n{2,}/).filter((b) => b.trim());
 
       for (const block of blocks) {
-        const role: NormalizedMessage['role'] = block.startsWith('> ') || block.includes('#### user')
-          ? 'user'
-          : block.includes('#### assistant')
-            ? 'assistant'
-            : 'user';
-        const text = block.replace(/^>+\s?/gm, '').replace(/^####\s+\w+\s*/i, '').trim();
+        const role: NormalizedMessage['role'] =
+          block.startsWith('> ') || block.includes('#### user')
+            ? 'user'
+            : block.includes('#### assistant')
+              ? 'assistant'
+              : 'user';
+        const text = block
+          .replace(/^>+\s?/gm, '')
+          .replace(/^####\s+\w+\s*/i, '')
+          .trim();
         if (!text) continue;
 
         let inputTokens: number | undefined;
@@ -92,7 +101,8 @@ export const aiderParser: ProviderParser = {
       if (!allowEstimate && !messages.some((m) => m.inputTokens || m.outputTokens)) {
         warnings.push({
           file: filePath,
-          message: 'Aider prompt history parsed without token usage (enable estimatePromptOnlySources to estimate)',
+          message:
+            'Aider prompt history parsed without token usage (enable estimatePromptOnlySources to estimate)',
           severity: 'warning',
           code: 'missing-token-fields',
         });
@@ -111,7 +121,8 @@ export const aiderParser: ProviderParser = {
                 : 'metadata-only',
             projectPath: path.dirname(filePath),
             projectName: path.basename(path.dirname(filePath)),
-            tokenUsageEstimated: allowEstimate && !messages.some((m) => m.usageConfidence === 'exact'),
+            tokenUsageEstimated:
+              allowEstimate && !messages.some((m) => m.usageConfidence === 'exact'),
           }),
         ],
         warnings,

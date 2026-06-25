@@ -1,7 +1,20 @@
 import fs from 'fs';
 import path from 'path';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
-import { applyPrivacyContent, buildSession, fileReadWarning, newMessageId, shouldStoreRaw } from './parser-helpers.js';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
+import {
+  applyPrivacyContent,
+  buildSession,
+  fileReadWarning,
+  jsonParseWarning,
+  newMessageId,
+  shouldStoreRaw,
+  streamJsonl,
+} from './parser-helpers.js';
 
 type AmpThread = {
   id?: string;
@@ -34,8 +47,17 @@ export const ampParser: ProviderParser = {
 
   canParse(filePath: string, sample: string): boolean {
     if (!filePath.includes('/amp/') && !filePath.includes('.local/share/amp')) return false;
-    if (!filePath.endsWith('.json')) return false;
+    // Doc §8.237: Amp emits JSONL (VERIFY); some builds use whole-file JSON.
+    const isJsonl = filePath.endsWith('.jsonl');
+    const isJson = filePath.endsWith('.json');
+    if (!isJsonl && !isJson) return false;
     try {
+      if (isJsonl) {
+        const line = sample.split('\n').find((l) => l.trim());
+        if (!line) return false;
+        const r = JSON.parse(line) as Partial<AmpThread>;
+        return r.usageLedger !== undefined || Array.isArray(r.messages) || r.id !== undefined;
+      }
       const data = JSON.parse(sample) as AmpThread;
       return data.usageLedger !== undefined || Array.isArray(data.messages);
     } catch {
@@ -45,11 +67,18 @@ export const ampParser: ProviderParser = {
 
   async parse(filePath: string, options?: ParseOptions): Promise<ParseResult> {
     const warnings: ParseResult['warnings'] = [];
-    try {
-      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as AmpThread;
-      const sessionId = data.id || path.basename(filePath, '.json');
-      const messages: NormalizedMessage[] = [];
-      const ledger = data.usageLedger;
+    const isJsonl = filePath.endsWith('.jsonl');
+    const fallbackSessionId = path.basename(filePath, isJsonl ? '.jsonl' : '.json');
+    const messages: NormalizedMessage[] = [];
+    let sessionId = fallbackSessionId;
+    let meta: { provider?: string; title?: string } = {};
+
+    const ingest = (data: AmpThread) => {
+      if (data.id && sessionId === fallbackSessionId) sessionId = data.id;
+      if (data.provider) meta.provider = data.provider;
+      if (data.title) meta.title = data.title;
+      const sessionLedger = data.usageLedger;
+      const sessionModel = normalizeModel(data.model);
 
       if (Array.isArray(data.messages)) {
         for (const msg of data.messages) {
@@ -72,21 +101,35 @@ export const ampParser: ProviderParser = {
             raw: shouldStoreRaw(options) ? msg : undefined,
           });
         }
-      } else if (ledger) {
+      }
+      if (sessionLedger) {
         messages.push({
           id: newMessageId(),
           sessionId,
           role: 'assistant',
-          model: normalizeModel(data.model),
+          model: sessionModel,
           contentPreview: '[session usage ledger]',
           contentHidden: true,
-          inputTokens: ledger.input_tokens,
-          outputTokens: ledger.output_tokens,
-          cacheCreationTokens: ledger.cache_creation_tokens,
-          cacheReadTokens: ledger.cache_read_tokens,
+          inputTokens: sessionLedger.input_tokens,
+          outputTokens: sessionLedger.output_tokens,
+          cacheCreationTokens: sessionLedger.cache_creation_tokens,
+          cacheReadTokens: sessionLedger.cache_read_tokens,
           usageConfidence: 'exact',
-          metadata: ledger.credits ? { credits: ledger.credits } : undefined,
+          metadata: sessionLedger.credits ? { credits: sessionLedger.credits } : undefined,
         });
+      }
+    };
+
+    try {
+      if (isJsonl) {
+        await streamJsonl<AmpThread>(
+          filePath,
+          (record) => ingest(record),
+          (lineNum, error) => warnings.push(jsonParseWarning(filePath, error, lineNum)),
+        );
+      } else {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as AmpThread;
+        ingest(data);
       }
 
       if (messages.length === 0) {
@@ -107,11 +150,13 @@ export const ampParser: ProviderParser = {
         sessions: [
           buildSession(sessionId, 'amp', messages, {
             sourcePath: filePath,
-            storageKind: 'json',
+            storageKind: isJsonl ? 'jsonl' : 'json',
             supportLevel: 'exact-usage',
             usageConfidence: 'exact',
             projectPath: path.dirname(filePath),
-            metadata: data.provider ? { provider: data.provider, title: data.title } : { title: data.title },
+            metadata: meta.provider
+              ? { provider: meta.provider, title: meta.title }
+              : { title: meta.title },
           }),
         ],
         warnings,

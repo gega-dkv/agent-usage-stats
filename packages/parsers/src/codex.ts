@@ -14,11 +14,7 @@ import {
   estimateTokensFromText,
   totalsFromMessages,
 } from '@agent-usage/shared';
-import {
-  buildSession,
-  normalizeSessionIdFromPath,
-  shouldStoreRaw,
-} from './parser-helpers.js';
+import { buildSession, normalizeSessionIdFromPath, shouldStoreRaw } from './parser-helpers.js';
 
 type LegacyCodexMessage = {
   role?: string;
@@ -242,12 +238,15 @@ export const codexParser: ProviderParser = {
             // Event-format object (small files only)
             if ('type' in data && 'payload' in data) return true;
             // Legacy object with a messages/conversation/history/session array
-            const arr =
-              Array.isArray(data.messages) ? data.messages :
-              Array.isArray(data.conversation) ? data.conversation :
-              Array.isArray(data.history) ? data.history :
-              Array.isArray(data.session) ? data.session :
-              undefined;
+            const arr = Array.isArray(data.messages)
+              ? data.messages
+              : Array.isArray(data.conversation)
+                ? data.conversation
+                : Array.isArray(data.history)
+                  ? data.history
+                  : Array.isArray(data.session)
+                    ? data.session
+                    : undefined;
             if (arr && arr.some(looksLikeLegacyCodexMessage)) return true;
             // Single legacy message record
             if (looksLikeLegacyCodexMessage(data)) return true;
@@ -334,9 +333,7 @@ export const codexParser: ProviderParser = {
   },
 };
 
-function detectCodexFormat(
-  filePath: string,
-): 'json' | 'jsonl' | 'events-jsonl' {
+function detectCodexFormat(filePath: string): 'json' | 'jsonl' | 'events-jsonl' {
   const fd = fs.openSync(filePath, 'r');
   try {
     const buf = Buffer.alloc(4096);
@@ -356,12 +353,7 @@ function detectCodexFormat(
       const firstLine = sample.split('\n')[0] || sample;
       try {
         const first = JSON.parse(firstLine);
-        if (
-          typeof first === 'object' &&
-          first !== null &&
-          'type' in first &&
-          'payload' in first
-        ) {
+        if (typeof first === 'object' && first !== null && 'type' in first && 'payload' in first) {
           return 'events-jsonl';
         }
         if (
@@ -382,11 +374,7 @@ function detectCodexFormat(
   }
 }
 
-function parseCodexJson(
-  data: unknown,
-  filePath: string,
-  options?: ParseOptions,
-): ParseResult {
+function parseCodexJson(data: unknown, filePath: string, options?: ParseOptions): ParseResult {
   const sessions: NormalizedSession[] = [];
   const warnings: ParseResult['warnings'] = [];
 
@@ -405,8 +393,7 @@ function parseCodexJson(
 
   if (messages.length === 0) return { sessions: [], warnings: [] };
 
-  const sessionId =
-    (messages[0] as LegacyCodexMessage)?.session_id || generateId();
+  const sessionId = (messages[0] as LegacyCodexMessage)?.session_id || generateId();
   const normalizedMessages: NormalizedMessage[] = [];
 
   for (let i = 0; i < messages.length; i++) {
@@ -434,10 +421,7 @@ function parseCodexJson(
   return { sessions, warnings };
 }
 
-async function parseCodexJsonl(
-  filePath: string,
-  options?: ParseOptions,
-): Promise<ParseResult> {
+async function parseCodexJsonl(filePath: string, options?: ParseOptions): Promise<ParseResult> {
   const sessions = new Map<string, NormalizedSession>();
   const warnings: ParseResult['warnings'] = [];
   const messagesBySession = new Map<string, NormalizedMessage[]>();
@@ -596,13 +580,7 @@ async function parseCodexEventsJsonl(
 
       // Update the running totals the same way scanner.md does, and record
       // divergence so the total-delta heuristic disables itself if needed.
-      const updated = applyCodexTurn(
-        last,
-        total,
-        delta,
-        previousTotals,
-        sawDivergentTotals,
-      );
+      const updated = applyCodexTurn(last, total, delta, previousTotals, sawDivergentTotals);
       previousTotals = updated.counted;
       rawTotalsBaseline = updated.rawBaseline;
       sawDivergentTotals = sawDivergentTotals || updated.diverged;
@@ -747,7 +725,15 @@ function computeCodexTurnDelta(args: {
         output: codexToInt(total.output_tokens),
       };
       const totalDelta = codexTotalsDelta(rawTotalsBaseline, rawTotals);
-      if (shouldPreferTotalDelta(rawTotalsBaseline, rawTotals, totalDelta, rawDelta, sawDivergentTotals)) {
+      if (
+        shouldPreferTotalDelta(
+          rawTotalsBaseline,
+          rawTotals,
+          totalDelta,
+          rawDelta,
+          sawDivergentTotals,
+        )
+      ) {
         return totalDelta;
       }
     }
@@ -820,8 +806,7 @@ function normalizeCodexMessage(
     role,
     model: msg.model,
     contentText: options?.privacyMode === 'disabled' ? undefined : contentText,
-    contentPreview:
-      options?.privacyMode === 'disabled' ? `[${role} message]` : contentPreview,
+    contentPreview: options?.privacyMode === 'disabled' ? `[${role} message]` : contentPreview,
     inputTokens: estInput,
     outputTokens: estOutput,
     toolName: msg.name,

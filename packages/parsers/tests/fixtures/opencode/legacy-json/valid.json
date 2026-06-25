@@ -1,7 +1,7 @@
 {
   "sessionID": "legacy-session-1",
-  "role": "user",
+  "role": "assistant",
   "model": "gpt-4o",
   "content": "Legacy OpenCode message",
-  "usage": { "input_tokens": 300, "output_tokens": 0 }
+  "tokens": { "input": 300, "output": 120, "cache_read": 80, "cache_write": 40, "reasoning": 15 }
 }

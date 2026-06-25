@@ -53,9 +53,7 @@ export function expandPath(pattern: string): string | null {
 }
 
 function expandPatterns(patterns: string[]): string[] {
-  return patterns
-    .map(expandPath)
-    .filter((p): p is string => p != null && p.length > 0);
+  return patterns.map(expandPath).filter((p): p is string => p != null && p.length > 0);
 }
 
 /** Resolved glob patterns where a provider's sessions may live. */
@@ -194,7 +192,17 @@ function pathLooksInstalled(pattern: string): boolean {
 
 function resolvePattern(pattern: string): string {
   const expanded = expandPath(pattern) ?? pattern;
-  return path.isAbsolute(expanded) ? expanded : path.resolve(expanded);
+  const absolute = path.isAbsolute(expanded) ? expanded : path.resolve(expanded);
+  // A bare directory (no glob magic) passed as a custom scan path must be
+  // expanded to a recursive glob, otherwise `glob` with `nodir:true` matches
+  // nothing inside it — which silently dropped whole provider trees (e.g.
+  // `scan --paths ~/.gemini/tmp` found 0 files). Explicit globs/files are
+  // left untouched.
+  const hasGlobMagic = /[*?[\]{}]/.test(absolute);
+  if (!hasGlobMagic && fs.existsSync(absolute) && fs.statSync(absolute).isDirectory()) {
+    return path.join(absolute, '**', '*');
+  }
+  return absolute;
 }
 
 /** Detect a provider from a file path (and, as a fallback, its contents). */
@@ -230,7 +238,10 @@ export function detectProvider(filePath: string): Provider {
   // Match against registry detect-dir hints (e.g. ".claude", ".gemini").
   for (const def of listProviders()) {
     for (const dir of def.detectDirs) {
-      const leaf = dir.replace(/^~\//, '').replace(/^~/, '').replace(/^\$[A-Z0-9_]+\//, '');
+      const leaf = dir
+        .replace(/^~\//, '')
+        .replace(/^~/, '')
+        .replace(/^\$[A-Z0-9_]+\//, '');
       if (leaf && filePath.includes(leaf)) return def.id;
     }
   }

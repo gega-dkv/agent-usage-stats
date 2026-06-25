@@ -13,6 +13,33 @@ export function listTables(db: SqliteDatabase): string[] {
   return rows.map((r) => r.name);
 }
 
+/**
+ * Run a query and return `[]` on any error (missing table/column, schema drift).
+ * Doc §13: drift-proofing for providers whose schema changes between versions
+ * (crush, cursor). On failure, optionally record a warning instead of letting
+ * the error abort the whole parse.
+ */
+export function safeQuery(
+  db: SqliteDatabase,
+  sql: string,
+  onWarning?: (warning: ParserWarning) => void,
+  filePath?: string,
+): Record<string, unknown>[] {
+  try {
+    return db.prepare(sql).all() as Record<string, unknown>[];
+  } catch (error) {
+    if (onWarning && filePath) {
+      onWarning(
+        unknownSchemaWarning(
+          filePath,
+          `Query failed (${error instanceof Error ? error.message : String(error)}): ${sql}`,
+        ),
+      );
+    }
+    return [];
+  }
+}
+
 export function tableColumns(db: SqliteDatabase, table: string): SqliteColumn[] {
   return db.prepare(`PRAGMA table_info(${table})`).all() as SqliteColumn[];
 }
@@ -62,7 +89,9 @@ export function parseJsonField(value: unknown): Record<string, unknown> | null {
   if (typeof value === 'string') {
     try {
       const parsed = JSON.parse(value);
-      return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null;
+      return typeof parsed === 'object' && parsed !== null
+        ? (parsed as Record<string, unknown>)
+        : null;
     } catch {
       return null;
     }

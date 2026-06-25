@@ -101,16 +101,54 @@ describe('Phase 2 provider parsers', () => {
     expect(result.sessions[0].totals.inputTokens).toBeGreaterThan(0);
   });
 
+  it('amp parses JSONL event-log threads (doc §8.237)', async () => {
+    const result = await ampParser.parse(fixture('amp', 'valid', 'jsonl'));
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0].totals.inputTokens).toBeGreaterThan(0);
+    expect(result.sessions[0].totals.cacheReadTokens).toBeGreaterThanOrEqual(0);
+  });
+
   it('factory droid parses settings usage', async () => {
     const result = await parseFixture(droidParser, 'droid', 'valid');
     expect(result.sessions).toHaveLength(1);
     expect(result.sessions[0].totals.reasoningTokens).toBeGreaterThan(0);
   });
 
+  it('factory droid parses JSONL session logs (doc §8.232)', async () => {
+    const result = await droidParser.parse(fixture('droid', 'valid', 'jsonl'));
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0].id).toBe('droid-jsonl-1');
+    // Aggregate across the per-line usage blocks and embedded messages.
+    expect(result.sessions[0].totals.outputTokens).toBeGreaterThanOrEqual(180);
+    expect(result.sessions[0].totals.cacheReadTokens).toBeGreaterThanOrEqual(30);
+  });
+
   it('codebuff parses nested metadata usage', async () => {
     const result = await parseFixture(codebuffParser, 'codebuff', 'valid');
     expect(result.sessions).toHaveLength(1);
     expect(result.sessions[0].totals.outputTokens).toBeGreaterThan(0);
+  });
+
+  it('codebuff captures message id, timestamp, and $0.01/credit cost (§8.228-229)', async () => {
+    const result = await parseFixture(codebuffParser, 'codebuff', 'valid');
+    const session = result.sessions[0];
+    // Real message id is preserved (not a random new id) → enables dedup.
+    expect(session.messages[0].id).toBe('cb-user-1');
+    // Timestamp fallback: message ts wins.
+    expect(session.messages[0].timestamp).toBe('2026-06-18T10:00:00Z');
+
+    // Credits-only message (no token usage) → approximate $0.01/credit.
+    const creditsMsg = session.messages.find((m) => m.id === 'cb-credits-only');
+    expect(creditsMsg?.recordedCost).toBe(0.05); // 5 credits * $0.01
+    expect(session.costs?.recordedCost).toBe(0.05);
+  });
+
+  it('codebuff resolves deep run-state messageHistory fallback (§8.227)', async () => {
+    const result = await parseFixture(codebuffParser, 'codebuff', 'runstate');
+    const session = result.sessions[0];
+    // The last providerOptions entry holds the real counts.
+    expect(session.totals.inputTokens).toBe(410);
+    expect(session.totals.outputTokens).toBe(90);
   });
 
   it('pi-agent parses jsonl and json fixtures', async () => {
@@ -209,6 +247,14 @@ describe('Phase 2 provider parsers', () => {
   it('opencode parses legacy json and sqlite fixtures', async () => {
     const legacy = await parseFixture(opencodeParser, 'opencode', 'legacy-valid');
     expect(legacy.sessions).toHaveLength(1);
+    // §6.173: legacy JSON carries a `tokens` object — cache.read/cache.write
+    // and reasoning must now be extracted (previously dropped).
+    const msg = legacy.sessions[0].messages[0];
+    expect(msg.inputTokens).toBe(300);
+    expect(msg.outputTokens).toBe(120);
+    expect(msg.cacheReadTokens).toBe(80);
+    expect(msg.cacheCreationTokens).toBe(40);
+    expect(msg.reasoningTokens).toBe(15);
 
     const sqlite = await parseFixture(opencodeParser, 'opencode', 'valid');
     expect(sqlite.sessions.length).toBeGreaterThan(0);

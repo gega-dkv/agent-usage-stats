@@ -34,6 +34,10 @@ export function openProviderDatabase(
     const db = new Database(filePath, {
       readonly: options?.readonly ?? true,
       fileMustExist: true,
+      // Set a busy_timeout (ms) so a locked DB waits and retries instead of
+      // failing immediately. This also lets SQLite read alongside a writer
+      // that is maintaining its -wal/-shm sidecar files. (doc §13 §7.)
+      timeout: 5000,
     });
     return { ok: true, db };
   } catch (error) {

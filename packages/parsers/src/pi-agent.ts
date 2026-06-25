@@ -1,6 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
 import {
   applyPrivacyContent,
   buildSession,
@@ -64,7 +69,8 @@ export const piAgentParser: ProviderParser = {
             const r = JSON.parse(line) as PiAgentRecord;
             if (r.type === 'model_change' || r.type === 'message') return true;
             if (r.usage !== undefined || r.role !== undefined) return true;
-            if (r.message && (r.message.usage !== undefined || r.message.role !== undefined)) return true;
+            if (r.message && (r.message.usage !== undefined || r.message.role !== undefined))
+              return true;
           } catch {
             // keep scanning
           }
@@ -161,7 +167,13 @@ function toMessage(
   const message = record.message;
   const roleRaw = message?.role ?? record.role ?? 'unknown';
   const role = roleRaw === 'user' ? 'user' : roleRaw === 'assistant' ? 'assistant' : 'unknown';
-  if (role === 'unknown' && !record.usage && !message?.usage && !record.content && !message?.content) {
+  if (
+    role === 'unknown' &&
+    !record.usage &&
+    !message?.usage &&
+    !record.content &&
+    !message?.content
+  ) {
     return null;
   }
 
@@ -181,10 +193,7 @@ function toMessage(
       : undefined;
 
   const hasUsage =
-    usage.input > 0 ||
-    usage.output > 0 ||
-    usage.cacheRead > 0 ||
-    usage.cacheWrite > 0;
+    usage.input > 0 || usage.output > 0 || usage.cacheRead > 0 || usage.cacheWrite > 0;
 
   return {
     id: record.id || message?.timestamp || newMessageId(),
@@ -249,7 +258,9 @@ function resolvePiAssistantIdentity(
 }
 
 /** Read a model_change row's provider/model into a context. Ports piModelContext. */
-function piModelContext(record: PiAgentRecord): { provider: PiResolvedProvider; model: string } | null {
+function piModelContext(
+  record: PiAgentRecord,
+): { provider: PiResolvedProvider; model: string } | null {
   const provider = mapPiProvider(record.provider);
   if (!provider) return null;
   const rawModel = String(record.modelId ?? record.model ?? '').trim();
@@ -318,7 +329,11 @@ function extractPiUsage(usage: PiUsage): {
 } {
   return {
     input: readPiNonNegativeInt(
-      usage.input ?? usage.inputTokens ?? usage.input_tokens ?? usage.promptTokens ?? usage.prompt_tokens,
+      usage.input ??
+        usage.inputTokens ??
+        usage.input_tokens ??
+        usage.promptTokens ??
+        usage.prompt_tokens,
     ),
     cacheRead: readPiNonNegativeInt(
       usage.cacheRead ??
@@ -339,7 +354,11 @@ function extractPiUsage(usage: PiUsage): {
         usage.cache_creation_input_tokens,
     ),
     output: readPiNonNegativeInt(
-      usage.output ?? usage.outputTokens ?? usage.output_tokens ?? usage.completionTokens ?? usage.completion_tokens,
+      usage.output ??
+        usage.outputTokens ??
+        usage.output_tokens ??
+        usage.completionTokens ??
+        usage.completion_tokens,
     ),
   };
 }

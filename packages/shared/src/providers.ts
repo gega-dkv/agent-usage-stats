@@ -166,9 +166,11 @@ export const PROVIDER_REGISTRY: Record<Provider, ProviderDefinition> = {
     pricingProvider: 'other',
     supportLevel: 'exact-usage',
     defaultConfidence: 'exact',
-    storageKinds: ['json'],
+    // Doc §8.232: JSONL session logs organized by workspace slug; some builds
+    // also emit single `.settings.json`. Cover both.
+    storageKinds: ['jsonl', 'json'],
     envVars: ['DROID_SESSIONS_DIR'],
-    defaultPaths: ['~/.factory/sessions/**/*.settings.json'],
+    defaultPaths: ['~/.factory/sessions/**/*.jsonl', '~/.factory/sessions/**/*.settings.json'],
     detectDirs: ['~/.factory'],
     hasParser: true,
     enabledByDefault: true,
@@ -179,9 +181,10 @@ export const PROVIDER_REGISTRY: Record<Provider, ProviderDefinition> = {
     pricingProvider: 'other',
     supportLevel: 'exact-usage',
     defaultConfidence: 'exact',
-    storageKinds: ['json'],
+    // Doc §8.237: JSONL (VERIFY); some builds use whole-file JSON threads.
+    storageKinds: ['jsonl', 'json'],
     envVars: ['AMP_DATA_DIR'],
-    defaultPaths: ['~/.local/share/amp/threads/**/*.json'],
+    defaultPaths: ['~/.local/share/amp/threads/**/*.jsonl', '~/.local/share/amp/threads/**/*.json'],
     detectDirs: ['~/.local/share/amp'],
     hasParser: true,
     enabledByDefault: true,

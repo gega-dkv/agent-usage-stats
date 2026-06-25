@@ -1,5 +1,10 @@
 import { openProviderDatabase } from '@agent-usage/db';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
 import { buildSession, newMessageId } from './parser-helpers.js';
 import {
   columnNames,
@@ -49,7 +54,12 @@ export const gooseParser: ProviderParser = {
         let outputTokens = outputCol ? readNumber(row[outputCol]) : undefined;
         const totalTokens = totalCol ? readNumber(row[totalCol]) : undefined;
         let reasoningTokens: number | undefined;
-        if (totalTokens && inputTokens != null && outputTokens != null && totalTokens > inputTokens + outputTokens) {
+        if (
+          totalTokens &&
+          inputTokens != null &&
+          outputTokens != null &&
+          totalTokens > inputTokens + outputTokens
+        ) {
           reasoningTokens = totalTokens - inputTokens - outputTokens;
         }
 

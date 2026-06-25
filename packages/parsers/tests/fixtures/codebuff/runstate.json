@@ -1,0 +1,19 @@
+[
+  {
+    "id": "cb-rs-1",
+    "role": "assistant",
+    "content": "Deep run-state fallback case.",
+    "metadata": {
+      "runState": {
+        "sessionState": {
+          "mainAgentState": {
+            "messageHistory": [
+              { "providerOptions": { "inputTokens": 0, "outputTokens": 0 } },
+              { "providerOptions": { "inputTokens": 410, "outputTokens": 90 } }
+            ]
+          }
+        }
+      }
+    }
+  }
+]

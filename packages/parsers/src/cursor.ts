@@ -1,7 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { openProviderDatabase } from '@agent-usage/db';
-import type { ProviderParser, ParseResult, ParseOptions, NormalizedMessage } from '@agent-usage/shared';
+import type {
+  ProviderParser,
+  ParseResult,
+  ParseOptions,
+  NormalizedMessage,
+} from '@agent-usage/shared';
 import {
   applyPrivacyContent,
   buildSession,
@@ -16,13 +21,15 @@ export const cursorParser: ProviderParser = {
 
   canParse(filePath: string, _sample: string): boolean {
     return (
-      (filePath.includes('.cursor') && (filePath.endsWith('state.vscdb') || filePath.endsWith('.db'))) ||
+      (filePath.includes('.cursor') &&
+        (filePath.endsWith('state.vscdb') || filePath.endsWith('.db'))) ||
       (filePath.includes('cursor') && filePath.endsWith('.md'))
     );
   },
 
   async parse(filePath: string, options?: ParseOptions): Promise<ParseResult> {
-    if (filePath.endsWith('.db') || filePath.endsWith('state.vscdb')) return parseStateDb(filePath, options);
+    if (filePath.endsWith('.db') || filePath.endsWith('state.vscdb'))
+      return parseStateDb(filePath, options);
     if (filePath.endsWith('.md')) return parseMarkdown(filePath, options);
     return { sessions: [], warnings: [] };
   },
@@ -35,9 +42,9 @@ async function parseStateDb(filePath: string, options?: ParseOptions): Promise<P
 
   const db = opened.db;
   try {
-    const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table'")
-      .all() as Array<{ name: string }>;
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{
+      name: string;
+    }>;
     const itemTable = tables.find((t) => t.name === 'ItemTable' || t.name === 'cursorDiskKV');
     if (!itemTable) {
       return {
@@ -54,18 +61,23 @@ async function parseStateDb(filePath: string, options?: ParseOptions): Promise<P
     }
 
     const rows = db
-      .prepare(`SELECT key, value FROM ${itemTable.name} WHERE key LIKE '%composer%' OR key LIKE '%chat%' OR key LIKE '%prompt%'`)
+      .prepare(
+        `SELECT key, value FROM ${itemTable.name} WHERE key LIKE '%composer%' OR key LIKE '%chat%' OR key LIKE '%prompt%'`,
+      )
       .all() as Array<{ key: string; value: string | Buffer }>;
 
     const messages: NormalizedMessage[] = [];
     const sessionId = path.basename(path.dirname(filePath));
 
     for (const row of rows) {
-      const payload = parseJsonField(typeof row.value === 'string' ? row.value : row.value.toString());
+      const payload = parseJsonField(
+        typeof row.value === 'string' ? row.value : row.value.toString(),
+      );
       if (!payload) continue;
       const text = extractCursorText(payload);
       if (!text) continue;
-      const role: NormalizedMessage['role'] = String(payload.role || '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
+      const role: NormalizedMessage['role'] =
+        String(payload.role || '').toLowerCase() === 'assistant' ? 'assistant' : 'user';
       const inputTokens = readExplicitTokens(payload, 'input');
       const outputTokens = readExplicitTokens(payload, 'output');
       const privacy = applyPrivacyContent(role, text, options);
@@ -112,7 +124,8 @@ async function parseStateDb(filePath: string, options?: ParseOptions): Promise<P
             : allowEstimate
               ? 'estimated-from-text'
               : 'metadata-only',
-          tokenUsageEstimated: allowEstimate && !messages.some((m) => m.usageConfidence === 'exact'),
+          tokenUsageEstimated:
+            allowEstimate && !messages.some((m) => m.usageConfidence === 'exact'),
         }),
       ],
       warnings: [],
@@ -163,14 +176,21 @@ function extractCursorText(payload: Record<string, unknown>): string | undefined
   if (typeof payload.content === 'string') return payload.content;
   if (Array.isArray(payload.messages)) {
     return payload.messages
-      .map((m) => (typeof m === 'object' && m && 'content' in m ? String((m as { content?: string }).content || '') : ''))
+      .map((m) =>
+        typeof m === 'object' && m && 'content' in m
+          ? String((m as { content?: string }).content || '')
+          : '',
+      )
       .filter(Boolean)
       .join('\n');
   }
   return undefined;
 }
 
-function readExplicitTokens(payload: Record<string, unknown>, side: 'input' | 'output'): number | undefined {
+function readExplicitTokens(
+  payload: Record<string, unknown>,
+  side: 'input' | 'output',
+): number | undefined {
   const usage = payload.usage as Record<string, number> | undefined;
   if (!usage) return undefined;
   const key = side === 'input' ? 'input_tokens' : 'output_tokens';

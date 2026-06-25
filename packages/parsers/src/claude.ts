@@ -8,7 +8,12 @@ import type {
   NormalizedMessage,
   NormalizedSession,
 } from '@agent-usage/shared';
-import { generateId, truncateText, estimateTokensFromText, totalsFromMessages } from '@agent-usage/shared';
+import {
+  generateId,
+  truncateText,
+  estimateTokensFromText,
+  totalsFromMessages,
+} from '@agent-usage/shared';
 import { shouldStoreRaw } from './parser-helpers.js';
 
 type ClaudeUsage = {
@@ -119,10 +124,7 @@ export const claudeParser: ProviderParser = {
   },
 };
 
-async function parseClaudeJsonl(
-  filePath: string,
-  options?: ParseOptions,
-): Promise<ParseResult> {
+async function parseClaudeJsonl(filePath: string, options?: ParseOptions): Promise<ParseResult> {
   const sessions = new Map<string, NormalizedSession>();
   const warnings: ParseResult['warnings'] = [];
   const messagesBySession = new Map<string, NormalizedMessage[]>();
@@ -159,9 +161,7 @@ async function parseClaudeJsonl(
       // Resolve the canonical shape: prefer the nested `message` object when
       // present (real Claude Code logs), otherwise fall back to top-level fields.
       const nested = isObject(record.message) ? record.message : undefined;
-      const role = mapClaudeRole(
-        record.role ?? record.type ?? nested?.role ?? 'unknown',
-      );
+      const role = mapClaudeRole(record.role ?? record.type ?? nested?.role ?? 'unknown');
       const contentSource = nested?.content ?? record.content;
       const contentText = extractContentText(contentSource);
       const contentPreview = truncateText(contentText || '', 200);
@@ -193,11 +193,7 @@ async function parseClaudeJsonl(
       // Real usage was provided for this row but every field is zero/absent.
       // Skip it rather than fabricating counts from text.
       const allZero =
-        hasUsageBlock &&
-        !inputTokens &&
-        !outputTokens &&
-        !cacheCreationTokens &&
-        !cacheReadTokens;
+        hasUsageBlock && !inputTokens && !outputTokens && !cacheCreationTokens && !cacheReadTokens;
       if (allZero) continue;
 
       // Real usage in Claude Code lives on assistant turns and is cumulative —
@@ -239,10 +235,7 @@ async function parseClaudeJsonl(
         role,
         model,
         contentText: options?.privacyMode === 'disabled' ? undefined : contentText,
-        contentPreview:
-          options?.privacyMode === 'disabled'
-            ? `[${role} message]`
-            : contentPreview,
+        contentPreview: options?.privacyMode === 'disabled' ? `[${role} message]` : contentPreview,
         inputTokens: estInput,
         outputTokens: estOutput,
         cachedInputTokens,
@@ -252,11 +245,7 @@ async function parseClaudeJsonl(
         toolInputPreview: options?.privacyMode === 'disabled' ? undefined : toolInputPreview,
         toolOutputPreview: options?.privacyMode === 'disabled' ? undefined : toolOutputPreview,
         metadata: maybeClaudeMetadata(record, model),
-        usageConfidence: hasUsageBlock
-          ? 'exact'
-          : estimated
-            ? 'estimated-from-text'
-            : undefined,
+        usageConfidence: hasUsageBlock ? 'exact' : estimated ? 'estimated-from-text' : undefined,
         raw: shouldStoreRaw(options) ? record : undefined,
       };
 
@@ -310,7 +299,10 @@ async function parseClaudeJsonl(
 }
 
 /** Returns the canonical dedup key for a Claude assistant turn. */
-function claudeDedupKey(messageId: string | undefined, requestId: string | undefined): string | null {
+function claudeDedupKey(
+  messageId: string | undefined,
+  requestId: string | undefined,
+): string | null {
   if (!messageId) return null;
   return `${messageId}:${requestId ?? ''}`;
 }
@@ -354,9 +346,7 @@ function mapClaudeRole(role: string): NormalizedMessage['role'] {
   }
 }
 
-function extractContentText(
-  content: string | ClaudeContentBlock[] | undefined,
-): string {
+function extractContentText(content: string | ClaudeContentBlock[] | undefined): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content

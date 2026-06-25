@@ -56,7 +56,8 @@ export function applyPrivacyContent(
     };
   }
   return {
-    contentText: options?.privacyMode === 'full' || options?.privacyMode === 'raw' ? contentText : undefined,
+    contentText:
+      options?.privacyMode === 'full' || options?.privacyMode === 'raw' ? contentText : undefined,
     contentPreview: truncateText(contentText, 200),
     contentHidden: false,
   };

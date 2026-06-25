@@ -62,7 +62,12 @@ export const hermesParser: ProviderParser = {
           cacheCreationTokens: cacheWriteCol ? readNumber(row[cacheWriteCol]) : undefined,
           reasoningTokens: reasoningCol ? readNumber(row[reasoningCol]) : undefined,
           recordedCost,
-          usageConfidence: actualCost != null ? 'provider-recorded-cost' : recordedCost != null ? 'provider-recorded-cost' : 'exact',
+          usageConfidence:
+            actualCost != null
+              ? 'provider-recorded-cost'
+              : recordedCost != null
+                ? 'provider-recorded-cost'
+                : 'exact',
         };
 
         return buildSession(sessionId, 'hermes', [message], {
